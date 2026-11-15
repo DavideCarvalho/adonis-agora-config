@@ -191,6 +191,11 @@ jobs:
           publish-script: pnpm release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Deliberately empty, like every Agora lib: setup-node writes
+          # `_authToken=${NODE_AUTH_TOKEN}` into ~/.npmrc; a real token there wins over OIDC and
+          # npm never exchanges the id-token for a credential. Empty, npm falls back to trusted
+          # publishing.
+          NODE_AUTH_TOKEN: ''
 
   snapshot:
     name: Publish beta snapshot to npm
@@ -227,3 +232,6 @@ jobs:
 
       - name: Publish beta snapshot
         run: pnpm changeset publish --tag beta --no-git-tag
+        env:
+          # Empty on purpose, as in the release job: a real token would win over OIDC.
+          NODE_AUTH_TOKEN: ''
