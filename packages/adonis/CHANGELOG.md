@@ -1,5 +1,13 @@
 # @adonis-agora/config
 
+## 0.2.0
+
+### Minor Changes
+
+- [#8](https://github.com/DavideCarvalho/adonis-agora-config/pull/8) [`3ce14df`](https://github.com/DavideCarvalho/adonis-agora-config/commit/3ce14df81b1101eb3196d31e70e87dbb072fdda3) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - The tenant HTTP client now ships inside `@adonis-agora/config` (root and the lean
+  `@adonis-agora/config/client` subpath), so a script, worker or Sail command installs one package.
+  `@adonis-agora/config-client` is deprecated; it keeps its published 0.1.0 for existing installs.
+
 ## 0.1.1
 
 ### Patch Changes
