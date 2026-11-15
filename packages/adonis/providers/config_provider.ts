@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ApplicationService } from '@adonisjs/core/types';
@@ -278,8 +277,7 @@ export default class ConfigProvider {
     const store: ConfigStore = await (config.store ?? stores.lucid())(factoryContext);
     await store.setup?.();
 
-    const app =
-      config.topology === 'standalone' ? (config.app ?? this.#packageName() ?? 'app') : '';
+    const app = config.topology === 'standalone' ? (config.app ?? '') : '';
     const consoleConfig = resolveConsoleConfig(config.console, { environment });
 
     let controlPlane: ControlPlane | undefined;
@@ -370,21 +368,6 @@ export default class ConfigProvider {
     try {
       if (!this.app.container.hasBinding('encryption')) return undefined;
       return (await this.app.container.make('encryption')) as EncrypterLike;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * The app's name from its package.json (`@acme/shop` → `shop`). AdonisJS 7's `appName` is always
-   * `adonisjs_app`; the package name is the partition a standalone app expects.
-   */
-  #packageName(): string | undefined {
-    try {
-      const raw = readFileSync(this.app.makePath('package.json'), 'utf8');
-      const name = (JSON.parse(raw) as { name?: unknown }).name;
-      if (typeof name !== 'string' || !name) return undefined;
-      return name.replace(/^@[^/]+\//, '');
     } catch {
       return undefined;
     }

@@ -66,8 +66,8 @@ interface BaseConfig {
 export interface StandaloneConfig extends BaseConfig {
   topology?: 'standalone';
   /**
-   * This app's name (the partition). Default: the app's `package.json` name without the scope
-   * (`@acme/shop` → `shop`), like the other Agora libs.
+   * This app's name (the partition). Optional on a standalone: when omitted the runtime has no
+   * default app and the console/CLI ask for one (`--application`).
    */
   app?: string;
   /** Where the configuration lives. Default `stores.lucid()`. */
