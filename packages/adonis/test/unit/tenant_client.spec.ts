@@ -157,6 +157,56 @@ describe('tenant client', () => {
     const snapshot = JSON.parse(await readFile(path, 'utf8'));
     expect(snapshot.version).toBe(2);
     expect(snapshot.entries['db.host'].value).toBe('db.internal');
+
+    // A later change that does not touch db.host does not report it as needing a restart again.
+    await store.write(testScope, [{ key: 'checkout.timeoutMs', value: 6000 }], {
+      actor: 'ann',
+      now: new Date().toISOString(),
+    });
+    await tenant.refresh();
+    expect(tenant.get('checkout.timeoutMs')).toBe(6000);
+    expect(changes.at(-1)).toMatchObject({
+      reloadable: ['checkout.timeoutMs'],
+      restartRequired: [],
+    });
+  });
+
+  it('removes a reloadable key deleted on the server, and keeps a boot-time one', async () => {
+    const store = memoryConfig();
+    await seedConfig(store, testScope, [
+      { key: 'checkout.timeoutMs', value: 3000, reloadable: true },
+      { key: 'db.host', value: 'localhost' },
+    ]);
+    const { url } = await startServer(store);
+    const tenant = client({
+      url,
+      partition: 'shop',
+      token: 'shop-secret',
+      stream: false,
+      intervalMs: 60_000,
+    });
+    const changes: Array<{
+      reloadable: string[];
+      restartRequired: string[];
+      removed: string[];
+    }> = [];
+    tenant.onChange((change) => changes.push(change));
+    await tenant.start();
+
+    await store.write(testScope, [{ key: 'checkout.timeoutMs' }, { key: 'db.host' }], {
+      actor: 'ann',
+      now: new Date().toISOString(),
+    });
+    expect(await tenant.refresh()).toBe(true);
+
+    // The reloadable key is gone from both maps; the boot-time key keeps what it booted with.
+    expect(tenant.get('checkout.timeoutMs')).toBeUndefined();
+    expect(tenant.entries()['checkout.timeoutMs']).toBeUndefined();
+    expect(tenant.get('db.host')).toBe('localhost');
+    expect(changes.at(-1)).toMatchObject({
+      removed: expect.arrayContaining(['checkout.timeoutMs']),
+      restartRequired: ['db.host'],
+    });
   });
 
   it('reloads a pushed change over the stream without waiting for the poll', async () => {

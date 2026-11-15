@@ -546,9 +546,11 @@ export class TenantClient {
     // The snapshot always keeps what the server sent (ciphertext for sealed values); only the
     // in-memory document is opened.
     const document = this.#resolveSealed(raw);
+    // What changed is decided against the last document received, not against what this process
+    // applied: a boot-time key that changed once must not be reported again on every later update.
+    const previous = this.#document?.entries ?? {};
     this.#document = document;
     const first = this.#boot === null;
-    const previous = this.entries();
     const masked = document;
     this.#version = document.version;
     this.#fingerprint = document.fingerprint;
@@ -585,8 +587,14 @@ export class TenantClient {
       if (this.#isReloadable(key, masked.entries[key] ?? previous[key])) {
         reloadable.push(key);
         const after = masked.entries[key];
-        if (after === undefined) delete this.#live[key];
-        else this.#live[key] = after;
+        if (after === undefined) {
+          delete this.#live[key];
+          // A reloadable key removed on the server is gone from the app too; a boot-time key
+          // keeps its boot value until a restart.
+          if (this.#boot) delete this.#boot[key];
+        } else {
+          this.#live[key] = after;
+        }
       } else {
         restartRequired.push(key);
       }
