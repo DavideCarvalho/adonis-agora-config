@@ -15,7 +15,7 @@ export {
   type VaultReference,
   vaultReference,
 } from './keys.js';
-export { isHiddenEntry, maskDocument, maskEntry } from './mask.js';
+export { isHiddenEntry, type MaskOptions, maskDocument, maskEntry } from './mask.js';
 export type {
   ConfigAuditAction,
   ConfigAuditRecord,
@@ -27,6 +27,7 @@ export type {
   ConfigEntryView,
   ConfigScalar,
   ConfigScope,
+  ConfigSealedTo,
   ConfigSnapshot,
   ConfigValue,
   OffsetPage,

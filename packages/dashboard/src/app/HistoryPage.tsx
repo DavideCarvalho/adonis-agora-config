@@ -192,6 +192,7 @@ export function HistoryPage() {
       cell: (entry) => (
         <span className="flex gap-1">
           {entry.secret ? <Badge variant="warn">secret</Badge> : null}
+          {entry.sealedTo !== undefined ? <Badge variant="info">sealed</Badge> : null}
           {entry.reloadable ? <Badge variant="info">reloadable</Badge> : null}
         </span>
       ),

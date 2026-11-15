@@ -20,6 +20,7 @@ import {
   resealStoredEntry,
   type StorePage,
   scopeKey,
+  type TenantPublicKey,
   type TouchedEntry,
   type VersionSummary,
   type WriteContext,
@@ -34,6 +35,8 @@ export class MemoryStore implements ConfigStore {
   readonly #versions = new Map<string, ConfigDocument[]>();
   readonly #audit: ConfigAuditRecord[] = [];
   readonly #sealer: DocumentSealer;
+  /** app → its public keys, in registration order (the latest registration last). */
+  readonly #tenantKeys = new Map<string, TenantPublicKey[]>();
 
   constructor(options: { secretCodec?: SecretCodec } = {}) {
     this.#sealer = new DocumentSealer(options.secretCodec);
@@ -222,6 +225,23 @@ export class MemoryStore implements ConfigStore {
 
   async reseal(options: { dryRun?: boolean } = {}): Promise<ResealReport> {
     return this.#reseal(options.dryRun === true);
+  }
+
+  async listTenantKeys(app: string): Promise<TenantPublicKey[]> {
+    return [...(this.#tenantKeys.get(app) ?? [])].reverse();
+  }
+
+  async registerTenantKey(key: TenantPublicKey): Promise<{ created: boolean }> {
+    const keys = this.#tenantKeys.get(key.app) ?? [];
+    const existing = keys.find((candidate) => candidate.kid === key.kid);
+    if (key.active) {
+      // Exactly one active key per app, even when the same key is re-registered.
+      for (const candidate of keys) candidate.active = candidate.kid === key.kid;
+    }
+    if (existing) return { created: false };
+    keys.push({ ...key, publicKey: { ...key.publicKey } });
+    this.#tenantKeys.set(key.app, keys);
+    return { created: true };
   }
 
   async recordReveal(

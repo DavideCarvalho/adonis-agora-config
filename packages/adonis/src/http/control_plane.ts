@@ -14,6 +14,11 @@ import {
   parseVaultReference,
 } from '@adonis-agora/config-core';
 import type { HttpContext } from '@adonisjs/core/http';
+import {
+  registerTenantKeys,
+  resealTenantEntries,
+  type TenantResealUpdate,
+} from '../crypto/tenant_keys.js';
 import type { VaultResolver } from '../define_config.js';
 import type { ConfigStore } from '../store/store.js';
 import {
@@ -28,6 +33,12 @@ interface RouterLike {
   get(pattern: string, handler: (ctx: HttpContext) => unknown): { as(name: string): unknown };
   any?(pattern: string, handler: (ctx: HttpContext) => unknown): unknown;
   route?(pattern: string, methods: string[], handler: (ctx: HttpContext) => unknown): unknown;
+}
+
+/** A body reader that works with Adonis' request and the test harness alike. */
+function bodyOf(ctx: HttpContext): unknown {
+  const request = ctx.request as unknown as { body?: () => unknown };
+  return typeof request.body === 'function' ? request.body() : {};
 }
 
 /** A tenant that reached the control plane, for the console's overview. */
@@ -112,11 +123,29 @@ export class ControlPlane {
     router.get(`${p}/v1/config`, (ctx) => this.getConfig(ctx)).as('config.cp.config');
     router.get(`${p}/v1/config/stream`, (ctx) => this.stream(ctx)).as('config.cp.stream');
     router.get(`${p}/v1/whoami`, (ctx) => this.whoami(ctx)).as('config.cp.whoami');
+    this.#route(router, `${p}/v1/keys`, 'GET', (ctx) => this.getKeys(ctx));
+    this.#route(router, `${p}/v1/keys`, 'PUT', (ctx) => this.putKeys(ctx));
+    this.#route(router, `${p}/v1/sealed`, 'POST', (ctx) => this.postSealed(ctx));
     if (this.options.corsOrigins?.length && router.route) {
-      router.route(`${p}/v1/config`, ['OPTIONS'], (ctx) => this.preflight(ctx));
-      router.route(`${p}/v1/config/stream`, ['OPTIONS'], (ctx) => this.preflight(ctx));
-      router.route(`${p}/v1/whoami`, ['OPTIONS'], (ctx) => this.preflight(ctx));
+      for (const path of ['config', 'config/stream', 'whoami', 'keys']) {
+        router.route(`${p}/v1/${path}`, ['OPTIONS'], (ctx) => this.preflight(ctx));
+      }
+      router.route(`${p}/v1/sealed`, ['OPTIONS'], (ctx) => this.preflight(ctx));
     }
+  }
+
+  /** Registers a non-GET route: `route` on Adonis, `any` on a minimal router. */
+  #route(
+    router: RouterLike,
+    pattern: string,
+    method: string,
+    handler: (ctx: HttpContext) => unknown,
+  ): void {
+    if (router.route) {
+      router.route(pattern, [method], handler);
+      return;
+    }
+    router.any?.(pattern, handler);
   }
 
   async #authenticate(ctx: HttpContext, required: string): Promise<VerifiedTenant | null> {
@@ -176,7 +205,9 @@ export class ControlPlane {
 
   /** The document as the caller may see it: masked first, then vault references resolved. */
   async view(document: ConfigDocument, canReadSecrets: boolean): Promise<ConfigDocumentView> {
-    const view = maskDocument(document, canReadSecrets);
+    // A sealed value is served as ciphertext to a secret reader (only the app opens it); without
+    // the capability it stays masked like any other secret.
+    const view = maskDocument(document, canReadSecrets, { serveSealed: true });
     if (!canReadSecrets || !this.options.vault) return view;
     const entries: Record<string, ConfigEntryView> = {};
     for (const [key, entry] of Object.entries(view.entries)) {
@@ -233,7 +264,7 @@ export class ControlPlane {
 
   async preflight(ctx: HttpContext) {
     this.#cors(ctx);
-    ctx.response.header('access-control-allow-methods', 'GET, OPTIONS');
+    ctx.response.header('access-control-allow-methods', 'GET, PUT, POST, OPTIONS');
     ctx.response.header(
       'access-control-allow-headers',
       'authorization, x-api-key, x-config-app, x-config-environment, x-config-label, if-none-match',
@@ -272,6 +303,103 @@ export class ControlPlane {
       capabilities: verified.capabilities,
       ...(verified.expiresAt ? { expiresAt: new Date(verified.expiresAt).toISOString() } : {}),
     });
+  }
+
+  /** The public keys this app registered (no private part ever reaches the server). */
+  async getKeys(ctx: HttpContext) {
+    this.#cors(ctx);
+    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
+    if (!verified) return;
+    const keys = (await this.options.store.listTenantKeys?.(verified.partition)) ?? [];
+    ctx.response.header('cache-control', 'no-store');
+    return ctx.response.json({
+      app: verified.partition,
+      active: keys.find((key) => key.active)?.kid ?? keys[0]?.kid,
+      keys: keys.map((key) => ({
+        ...key.publicKey,
+        active: key.active,
+        registeredAt: key.createdAt,
+        registeredBy: key.createdBy,
+      })),
+    });
+  }
+
+  /**
+   * Registers the app's X25519 public keys. The app comes from the verified token; the body only
+   * carries public JWKs and which `kid` is active, so a tenant can only speak for itself.
+   */
+  async putKeys(ctx: HttpContext) {
+    this.#cors(ctx);
+    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
+    if (!verified) return;
+    try {
+      const keys = await registerTenantKeys(this.options.store, verified.partition, bodyOf(ctx), {
+        actor: verified.clientId ?? verified.partition,
+        now: new Date().toISOString(),
+      });
+      return ctx.response.json({
+        app: verified.partition,
+        active: keys.find((key) => key.active)?.kid ?? keys[0]?.kid,
+        keys: keys.map((key) => ({
+          ...key.publicKey,
+          active: key.active,
+          registeredAt: key.createdAt,
+          registeredBy: key.createdBy,
+        })),
+      });
+    } catch (error) {
+      this.options.logger?.debug?.(`[@adonis-agora/config] key registration refused: ${error}`);
+      return ctx.response.status(400).send({ error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Accepts ciphertext the app re-sealed to its active key. The control plane validates that every
+   * entry was already sealed to this app and that the target `kid` is registered, then writes it
+   * without opening it.
+   */
+  async postSealed(ctx: HttpContext) {
+    this.#cors(ctx);
+    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
+    if (!verified) return;
+    const scope = this.#scope(verified, ctx);
+    const body = bodyOf(ctx) as { version?: unknown; entries?: unknown };
+    if (typeof body.version !== 'number' || !Number.isInteger(body.version) || body.version < 1) {
+      return ctx.response.status(400).send({ error: 'version must be a positive integer' });
+    }
+    if (!Array.isArray(body.entries) || body.entries.length === 0) {
+      return ctx.response.status(400).send({ error: 'entries must be a non-empty array' });
+    }
+    const updates: TenantResealUpdate[] = [];
+    for (const value of body.entries) {
+      const entry = value as Partial<TenantResealUpdate>;
+      if (
+        typeof entry.key !== 'string' ||
+        typeof entry.value !== 'string' ||
+        typeof entry.kid !== 'string'
+      ) {
+        return ctx.response
+          .status(400)
+          .send({ error: 'each entry needs { key, value, kid } (all strings)' });
+      }
+      updates.push({ key: entry.key, value: entry.value, kid: entry.kid });
+    }
+    try {
+      const result = await resealTenantEntries(this.options.store, scope, updates, {
+        actor: verified.clientId ?? verified.partition,
+        now: new Date().toISOString(),
+        version: body.version,
+      });
+      if (result.changed) this.bus.publish(scope, result.version);
+      return ctx.response.json(result);
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('stale re-seal')) {
+        return ctx.response.status(409).send({ error: message });
+      }
+      this.options.logger?.debug?.(`[@adonis-agora/config] re-seal refused: ${message}`);
+      return ctx.response.status(400).send({ error: message });
+    }
   }
 
   /** SSE: `event: config` on every change; closes when the token expires. */

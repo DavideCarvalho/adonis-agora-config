@@ -5,11 +5,13 @@ import {
   type ConfigEntryInput,
   type ConfigEntryState,
   type ConfigScope,
+  type ConfigSealedTo,
   type ConfigValue,
   fingerprintOf,
   isVaultReference,
 } from '@adonis-agora/config-core';
 import { entryAad, type SecretCodec } from '../crypto/secrets.js';
+import type { OkpJwk } from '../crypto-kit/index.js';
 
 /** One version row, as history lists it. */
 export interface VersionSummary {
@@ -77,10 +79,32 @@ export interface ConfigStore {
   ): Promise<StorePage<ConfigAuditRecord>>;
   /** Records that somebody read a secret value (the console's reveal). */
   recordReveal(scope: ConfigScope, key: string, version: number, actor: string): Promise<void>;
+  /** X25519 public keys registered by an app, newest registration first. */
+  listTenantKeys?(app: string): Promise<TenantPublicKey[]>;
+  /** Registers (or re-activates) one of an app's public keys. */
+  registerTenantKey?(key: TenantPublicKey): Promise<{ created: boolean }>;
   /** How the stored secrets stand against the active key (doctor). */
   cryptoStatus?(): Promise<CryptoStatusCounts>;
   /** Re-seals values written with a retired/legacy key with the active one (the reseal command). */
   reseal?(options: { dryRun?: boolean }): Promise<ResealReport>;
+}
+
+/**
+ * A tenant app's X25519 public key, as the control plane keeps it. Only the public half ever reaches
+ * the server: the private key stays in the app, sealed with its own symmetric keyring.
+ */
+export interface TenantPublicKey {
+  app: string;
+  /** The kit's key id (`OkpJwk.kid`). */
+  kid: string;
+  /** The public JWK (`kty: 'OKP'`, `crv: 'X25519'`, `x`, `kid`; never `d`). */
+  publicKey: OkpJwk;
+  /** The key new `sealTo` writes use. Exactly one active key per app. */
+  active: boolean;
+  /** ISO date of when the registration was first seen. */
+  createdAt: string;
+  /** Who registered it (`tenant:<clientId>`, `cli:<user>`, …). */
+  createdBy: string;
 }
 
 /** Counts of stored secret values per crypto-kit status. */
@@ -114,7 +138,8 @@ export async function resealStoredEntry(
   dryRun: boolean,
   counts: ResealReport,
 ): Promise<ConfigEntryState> {
-  if (!entry.secret || entry.vault !== undefined || typeof entry.value !== 'string') return entry;
+  if (!entry.secret || entry.vault !== undefined || entry.sealedTo !== undefined) return entry;
+  if (typeof entry.value !== 'string') return entry;
   counts.scanned += 1;
   let status: keyof CryptoStatusCounts;
   try {
@@ -164,7 +189,13 @@ export class DocumentSealer {
   }
 
   async sealEntry(entry: ConfigEntryState, aad: string): Promise<ConfigEntryState> {
-    if (!entry.secret || entry.vault !== undefined || entry.value === undefined)
+    // A value sealed to an app is opaque here: the control plane must never open (or re-seal) it.
+    if (
+      !entry.secret ||
+      entry.vault !== undefined ||
+      entry.sealedTo !== undefined ||
+      entry.value === undefined
+    )
       return { ...entry };
     if (!this.codec) {
       throw new Error(
@@ -175,7 +206,12 @@ export class DocumentSealer {
   }
 
   async openEntry(entry: ConfigEntryState, aad: string): Promise<ConfigEntryState> {
-    if (!entry.secret || entry.vault !== undefined || entry.value === undefined)
+    if (
+      !entry.secret ||
+      entry.vault !== undefined ||
+      entry.sealedTo !== undefined ||
+      entry.value === undefined
+    )
       return { ...entry };
     if (!this.codec) {
       throw new Error(
@@ -239,6 +275,7 @@ function sameEntry(a: ConfigEntryState | undefined, b: ConfigEntryState | undefi
     a.reloadable === b.reloadable &&
     (a.description ?? '') === (b.description ?? '') &&
     (a.vault ?? '') === (b.vault ?? '') &&
+    JSON.stringify(a.sealedTo ?? null) === JSON.stringify(b.sealedTo ?? null) &&
     JSON.stringify(a.value ?? null) === JSON.stringify(b.value ?? null)
   );
 }
@@ -257,10 +294,19 @@ function normalizeInput(input: ConfigEntryInput): ConfigEntryInput {
   if (vault !== undefined && !vault.startsWith('vault://')) {
     throw new Error(`config: entry "${input.key}" has an invalid vault reference "${vault}"`);
   }
+  if (input.sealedTo === true) {
+    throw new Error(
+      `config: entry "${input.key}" asked to be sealed but reached the store unresolved; only the config admin can seal to an app key`,
+    );
+  }
+  if (input.sealedTo !== undefined && (vault !== undefined || value === undefined)) {
+    throw new Error(`config: entry "${input.key}" must hold a value to be sealed to an app`);
+  }
   return {
     key: input.key,
     ...(value !== undefined ? { value } : {}),
     ...(vault !== undefined ? { vault } : {}),
+    ...(input.sealedTo !== undefined ? { sealedTo: input.sealedTo } : {}),
     ...(input.secret !== undefined ? { secret: input.secret } : {}),
     ...(input.reloadable !== undefined ? { reloadable: input.reloadable } : {}),
     ...(input.description !== undefined ? { description: input.description } : {}),
@@ -291,6 +337,7 @@ export function applyChanges(
     const next: ConfigEntryState = {
       ...(input.value !== undefined ? { value: input.value as ConfigValue } : {}),
       ...(input.vault !== undefined ? { vault: input.vault } : {}),
+      ...(input.sealedTo !== undefined ? { sealedTo: input.sealedTo as ConfigSealedTo } : {}),
       secret: input.secret ?? existing?.secret ?? input.vault !== undefined,
       reloadable: input.reloadable ?? existing?.reloadable ?? false,
       ...(input.description === null

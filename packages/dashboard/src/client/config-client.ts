@@ -7,6 +7,8 @@ export interface Entry {
   key: string;
   value?: unknown;
   masked: boolean;
+  /** The app this value is sealed to (`agora:pk1`); the control plane cannot open it. */
+  sealedTo?: { app: string; kid: string };
   secret: boolean;
   reloadable: boolean;
   description?: string;
@@ -78,6 +80,8 @@ export interface Meta {
 export interface EntryInput {
   value?: unknown;
   vault?: string;
+  /** Seal the value to this app's registered public key (no reveal afterwards). */
+  sealedTo?: boolean;
   secret?: boolean;
   reloadable?: boolean;
   description?: string | null;

@@ -19,6 +19,8 @@ import {
 } from '../../commands/config.js';
 import ConfigCryptoReseal from '../../commands/crypto.js';
 import ConfigPull from '../../commands/pull.js';
+import ConfigTenantKey from '../../commands/tenant_key.js';
+import { generateKeyPair } from '../../src/crypto-kit/index.js';
 import { defineConfig, stores } from '../../src/define_config.js';
 import { ControlPlane } from '../../src/http/control_plane.js';
 import { MemoryStore } from '../../src/store/memory_store.js';
@@ -354,6 +356,60 @@ describe('commands', () => {
     const real = await run(ConfigCryptoReseal as never, ['--json']);
     real.instance.assertSucceeded();
     expect(real.json()).toMatchObject({ dryRun: false, resealed: 0, failed: 0 });
+  });
+
+  it('seals an entry from the CLI and lists the registered app keys', async () => {
+    const runtime = (await app.container.make('agora.config')) as {
+      store?: {
+        registerTenantKey?: (key: {
+          app: string;
+          kid: string;
+          publicKey: unknown;
+          active: boolean;
+          createdAt: string;
+          createdBy: string;
+        }) => Promise<unknown>;
+      };
+    };
+    const pair = generateKeyPair('x25519');
+    await runtime.store?.registerTenantKey?.({
+      app: 'shop',
+      kid: pair.publicKey.kid,
+      publicKey: pair.publicKey,
+      active: true,
+      createdAt: new Date().toISOString(),
+      createdBy: 'test',
+    });
+
+    const set = await run(ConfigEntrySet as never, [
+      'stripe.sealed',
+      'sk_live_123',
+      ...scopeFlags,
+      '--sealed',
+      '--json',
+    ]);
+    set.instance.assertSucceeded();
+
+    const got = await run(ConfigEntryGet as never, [
+      'stripe.sealed',
+      ...scopeFlags,
+      '--secrets',
+      '--json',
+    ]);
+    const entry = got.json();
+    expect(entry).toMatchObject({
+      masked: true,
+      secret: true,
+      sealedTo: { app: 'shop', kid: pair.publicKey.kid },
+    });
+    expect(entry.value).toBeUndefined();
+
+    const keys = await run(ConfigTenantKey as never, ['--application=shop', '--json']);
+    const body = keys.json();
+    expect(body.app).toBe('shop');
+    expect(body.keys).toHaveLength(1);
+    expect(body.keys[0]).toMatchObject({ kid: pair.publicKey.kid, active: true });
+    expect(JSON.stringify(body)).not.toContain('"d"');
   });
 
   it('records cli:<os user> as the actor and refuses a value-less set', async () => {

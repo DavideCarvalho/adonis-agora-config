@@ -28,6 +28,7 @@ import {
   type ResealReport,
   resealStoredEntry,
   type StorePage,
+  type TenantPublicKey,
   type TouchedEntry,
   type VersionSummary,
   type WriteContext,
@@ -131,6 +132,19 @@ export class LucidStore implements ConfigStore {
       before text NULL,
       after text NULL,
       at varchar(32) NOT NULL
+    )`,
+    );
+    await query(
+      this.db,
+      `CREATE TABLE IF NOT EXISTS config_tenant_keys (
+      id varchar(36) NOT NULL PRIMARY KEY,
+      app varchar(128) NOT NULL,
+      kid varchar(128) NOT NULL,
+      public_key text NOT NULL,
+      active integer NOT NULL,
+      created_by varchar(255) NOT NULL,
+      created_at varchar(32) NOT NULL,
+      CONSTRAINT config_tenant_keys_app_kid UNIQUE (app, kid)
     )`,
     );
   }
@@ -522,6 +536,73 @@ export class LucidStore implements ConfigStore {
 
   async reseal(options: { dryRun?: boolean } = {}): Promise<ResealReport> {
     return this.#reseal(options.dryRun === true);
+  }
+
+  async listTenantKeys(app: string): Promise<TenantPublicKey[]> {
+    const rows = await query<{
+      app: string;
+      kid: string;
+      public_key: unknown;
+      active: unknown;
+      created_by: string;
+      created_at: string;
+    }>(
+      this.db,
+      `SELECT app, kid, public_key, active, created_by, created_at FROM config_tenant_keys
+       WHERE app = ? ORDER BY created_at DESC, id DESC`,
+      [app],
+    );
+    return rows.map((row) => ({
+      app: row.app,
+      kid: row.kid,
+      publicKey: parseJson<Record<string, unknown>>(
+        row.public_key,
+      ) as unknown as TenantPublicKey['publicKey'],
+      active: toNumber(row.active) === 1,
+      createdBy: row.created_by,
+      createdAt: row.created_at,
+    }));
+  }
+
+  async registerTenantKey(key: TenantPublicKey): Promise<{ created: boolean }> {
+    const existing = await query<{ id: string }>(
+      this.db,
+      'SELECT id FROM config_tenant_keys WHERE app = ? AND kid = ? LIMIT 1',
+      [key.app, key.kid],
+    );
+    // One active key per app: deactivate the previous one, then activate this one when asked.
+    if (key.active) {
+      await query(this.db, 'UPDATE config_tenant_keys SET active = 0 WHERE app = ?', [key.app]);
+    }
+    if (existing.length > 0) {
+      if (key.active) {
+        await query(this.db, 'UPDATE config_tenant_keys SET active = 1 WHERE app = ? AND kid = ?', [
+          key.app,
+          key.kid,
+        ]);
+      }
+      return { created: false };
+    }
+    try {
+      await query(
+        this.db,
+        `INSERT INTO config_tenant_keys (id, app, kid, public_key, active, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(),
+          key.app,
+          key.kid,
+          jsonValue(key.publicKey),
+          key.active ? 1 : 0,
+          key.createdBy,
+          key.createdAt,
+        ],
+      );
+      return { created: true };
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      return { created: false };
+    }
   }
 
   async recordReveal(

@@ -14,6 +14,7 @@ import {
 } from './config.js';
 import ConfigCryptoReseal from './crypto.js';
 import ConfigPull from './pull.js';
+import ConfigTenantKey from './tenant_key.js';
 
 /**
  * The commands of `@adonis-agora/config`, registered by `configure` with
@@ -33,6 +34,7 @@ const loader = new ListLoader([
   ConfigEnv,
   ConfigPull,
   ConfigCryptoReseal,
+  ConfigTenantKey,
   AgoraDoctor,
 ]);
 

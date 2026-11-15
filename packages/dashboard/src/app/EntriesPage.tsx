@@ -20,6 +20,13 @@ import { useConsole } from './console-context';
 import { editorText, exactTime, parseEditorText, preview, relativeTime } from './format';
 
 function ValueCell({ entry }: { entry: Entry }) {
+  if (entry.sealedTo !== undefined) {
+    return (
+      <span className="mono text-[11px] text-violet" title="Only this app's private key opens it">
+        sealed for {entry.sealedTo.app}
+      </span>
+    );
+  }
   if (entry.masked) {
     return <span className="mono text-[11px] text-faint">•••••• masked</span>;
   }
@@ -47,6 +54,7 @@ const columns: Column<Entry>[] = [
     cell: (entry) => (
       <span className="flex flex-wrap gap-1">
         {entry.secret ? <Badge variant="warn">secret</Badge> : null}
+        {entry.sealedTo !== undefined ? <Badge variant="info">sealed</Badge> : null}
         {entry.reloadable ? (
           <Badge variant="info">reloadable</Badge>
         ) : (
@@ -75,6 +83,7 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
   const [value, setValue] = useState(editing?.masked ? '' : editorText(editing?.value));
   const [vault, setVault] = useState(editing?.vault ?? '');
   const [secret, setSecret] = useState(editing?.secret ?? false);
+  const [sealedTo, setSealedTo] = useState(editing?.sealedTo !== undefined);
   const [reloadable, setReloadable] = useState(editing?.reloadable ?? false);
   const [description, setDescription] = useState(editing?.description ?? '');
   const [message, setMessage] = useState('');
@@ -91,6 +100,7 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
     mutationFn: () => {
       const input: EntryInput = {
         secret,
+        sealedTo,
         reloadable,
         ...(description.trim() !== ''
           ? { description: description.trim() }
@@ -131,7 +141,8 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
           <DialogDescription>
             {scope.app} / {scope.environment} / {scope.label}. A reloadable key applies on a running
             tenant; the rest need a restart. A secret is encrypted at rest and served only with{' '}
-            <span className="mono">config:secrets:read</span>.
+            <span className="mono">config:secrets:read</span>. Sealing a value for the app means the
+            control plane can never read it again.
           </DialogDescription>
         </DialogHeader>
 
@@ -151,7 +162,13 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
 
           <label htmlFor="entry-value" className="grid gap-1 text-[11px] text-faint">
             Value
-            {editing?.masked ? (
+            {editing?.sealedTo !== undefined ? (
+              <div className="rounded-md border border-border px-2 py-1.5 text-[11px] text-faint">
+                sealed for <span className="mono">{editing.sealedTo.app}</span> — only that app's
+                private key opens it, so there is nothing to reveal here. Retype the value to
+                replace it.
+              </div>
+            ) : editing?.masked ? (
               <div className="flex items-center gap-2">
                 <span className="mono flex-1 rounded-md border border-border px-2 py-1.5 text-[11px] text-faint">
                   masked — the server withheld this secret
@@ -200,6 +217,14 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
                 onChange={(event) => setSecret(event.target.checked)}
               />
               secret
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={sealedTo}
+                onChange={(event) => setSealedTo(event.target.checked)}
+              />
+              seal for {scope.app}
             </label>
             <label className="flex items-center gap-2">
               <input

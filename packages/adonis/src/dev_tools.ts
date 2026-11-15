@@ -334,7 +334,7 @@ export function configDevTools(
       name: 'config_set_entry',
       kind: 'action',
       description:
-        'Create or update one entry. `value` is a JSON object/array/primitive, or plain text with `string: true`. A `vault` reference replaces the value. Returns { version, changed }. A reloadable key applies on running tenants; the rest need a restart.',
+        'Create or update one entry. `value` is a JSON object/array/primitive, or plain text with `string: true`. A `vault` reference replaces the value. `sealed: true` seals the value to the app key (the server cannot read it). Returns { version, changed }. A reloadable key applies on running tenants; the rest need a restart.',
       input: {
         type: 'object',
         properties: {
@@ -347,6 +347,11 @@ export function configDevTools(
           secret: {
             type: 'boolean',
             description: 'Encrypt at rest; read needs config:secrets:read.',
+          },
+          sealed: {
+            type: 'boolean',
+            description:
+              "Seal the value to this app's X25519 public key: the server cannot read it, only the app can.",
           },
           reloadable: { type: 'boolean', description: 'Apply on a running tenant.' },
           description: { type: 'string' },
@@ -385,6 +390,7 @@ export function configDevTools(
           {
             ...(value !== undefined ? { value: toConfigValue(value) } : {}),
             ...(vault !== undefined ? { vault } : {}),
+            ...(input.sealed === true ? { sealedTo: true, secret: true } : {}),
             ...(typeof input.secret === 'boolean' ? { secret: input.secret } : {}),
             ...(typeof input.reloadable === 'boolean' ? { reloadable: input.reloadable } : {}),
             ...(str(input, 'description') !== undefined

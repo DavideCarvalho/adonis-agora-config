@@ -395,6 +395,12 @@ export class ConfigConsole {
       if (typeof body.secret !== 'boolean') throw new HttpError(400, 'secret must be a boolean');
       input.secret = body.secret;
     }
+    if (body.sealedTo !== undefined) {
+      if (typeof body.sealedTo !== 'boolean') {
+        throw new HttpError(400, 'sealedTo must be a boolean');
+      }
+      input.sealedTo = body.sealedTo;
+    }
     if (body.reloadable !== undefined) {
       if (typeof body.reloadable !== 'boolean') {
         throw new HttpError(400, 'reloadable must be a boolean');

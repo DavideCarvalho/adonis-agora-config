@@ -95,11 +95,13 @@ export abstract class ConfigCommand extends BaseCommand {
     for (const entry of entries) {
       table.row([
         entry.key,
-        entry.masked
-          ? '(masked)'
-          : entry.vault !== undefined
-            ? entry.vault
-            : formatValue(entry.value),
+        entry.sealedTo !== undefined
+          ? `(sealed for ${entry.sealedTo.app})`
+          : entry.masked
+            ? '(masked)'
+            : entry.vault !== undefined
+              ? entry.vault
+              : formatValue(entry.value),
         entry.secret ? 'yes' : '',
         entry.reloadable ? 'yes' : '',
         entry.updatedBy,

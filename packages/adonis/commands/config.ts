@@ -81,11 +81,13 @@ export class ConfigEntryGet extends ConfigCommand {
     this.output(entry, () => {
       this.logger.info(`${entry.key} (${scope.app} / ${scope.environment} / ${scope.label})`);
       this.logger.log(
-        entry.masked
-          ? '(masked — pass --secrets to reveal, which is audited)'
-          : entry.vault !== undefined
-            ? entry.vault
-            : formatValue(entry.value),
+        entry.sealedTo !== undefined
+          ? `(sealed for ${entry.sealedTo.app} — only that app's private key opens it)`
+          : entry.masked
+            ? '(masked — pass --secrets to reveal, which is audited)'
+            : entry.vault !== undefined
+              ? entry.vault
+              : formatValue(entry.value),
       );
       this.logger.info(
         `${entry.secret ? 'secret' : 'plain'} · ${entry.reloadable ? 'reloadable' : 'needs a restart'} · ${entry.updatedBy} · ${entry.updatedAt}`,
@@ -117,6 +119,12 @@ export class ConfigEntrySet extends ConfigCommand {
   @flags.boolean({ description: 'Encrypt the value at rest and gate it on config:secrets:read' })
   declare secret: boolean;
 
+  @flags.boolean({
+    description:
+      "Seal the value to this app's X25519 public key (the control plane cannot read it again)",
+  })
+  declare sealed: boolean;
+
   @flags.boolean({ description: 'Apply on a running tenant without a restart' })
   declare reloadable: boolean;
 
@@ -147,6 +155,7 @@ export class ConfigEntrySet extends ConfigCommand {
           : {}),
         ...(this.vault !== undefined ? { vault: this.vault } : {}),
         // A missing flag keeps the entry's current flags (the console can turn them off explicitly).
+        ...(this.sealed === true ? { sealedTo: true, secret: true } : {}),
         ...(this.secret === true ? { secret: true } : {}),
         ...(this.reloadable === true ? { reloadable: true } : {}),
         ...(this.description !== undefined ? { description: this.description } : {}),
@@ -155,7 +164,7 @@ export class ConfigEntrySet extends ConfigCommand {
     );
     this.output({ scope, key: this.key, ...result }, () => {
       this.logger.success(
-        `${result.changed ? 'wrote' : 'no change to'} ${this.key} at v${result.version} in ${scope.app}/${scope.environment}/${scope.label}`,
+        `${result.changed ? 'wrote' : 'no change to'} ${this.key} at v${result.version} in ${scope.app}/${scope.environment}/${scope.label}${this.sealed === true ? ` (sealed for ${scope.app})` : ''}`,
       );
     });
   }

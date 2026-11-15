@@ -20,13 +20,14 @@ node ace config:audit --application=streaming --action=reveal
 node ace config:env --application=streaming
 node ace config:pull --application=streaming --write=.env.local
 node ace config:crypto:reseal --dry-run
+node ace config:tenant:key --rotate
 ```
 
 | Command | |
 | --- | --- |
 | `config:entry:list` | entries, with `--search`, `--secret`, `--reloadable`, `--page`, `--size` |
 | `config:entry:get <key>` | one entry; `--secrets` reveals a secret (audited) |
-| `config:entry:set <key> <value>` | JSON or text; `--vault`, `--secret`, `--reloadable`, `--description`, `--message`, `--string` |
+| `config:entry:set <key> <value>` | JSON or text; `--vault`, `--secret`, `--sealed` (control plane cannot read it), `--reloadable`, `--description`, `--message`, `--string` |
 | `config:entry:unset <key>` | removes it; asks unless `--force` |
 | `config:history` | versions, newest first (`--oldest`, `--page`, `--size`) |
 | `config:version:show <version>` | one version exactly as it was (`--secrets`) |
@@ -36,6 +37,7 @@ node ace config:crypto:reseal --dry-run
 | `config:env` | the resolved values as `KEY=value`, for `eval`/pipes; `--secrets` (audited), `--prefix` |
 | `config:pull` | writes the managed `.env.local` block (or prints without `--write`); `--url`, `--token`, authkit flags, `--secrets` (audited) |
 | `config:crypto:reseal` | re-seals values with the active crypto key; `--dry-run`, `--json` |
+| `config:tenant:key` | the tenant's X25519 key for sealed secrets: show, `--rotate`, `--reseal`, `--dry-run`; on a server, list an app's public keys with `--application` |
 
 Every command takes `--application`, `--environment` and `--label` (defaults: the app in the
 runtime, the process environment, `main`) and `--json`. A failure sets exit code 1 and writes the

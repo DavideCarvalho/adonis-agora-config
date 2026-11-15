@@ -44,6 +44,7 @@ import {
   takeTenantBootstrap,
   tenantBootstrapKey,
 } from '../src/topology/tenant_client.js';
+import { DEFAULT_TENANT_KEY_PATH, TenantKeyring } from '../src/topology/tenant_keyring.js';
 import { resolveTenantVerifier } from '../src/topology/verify.js';
 
 declare module '@adonisjs/core/types' {
@@ -123,9 +124,14 @@ export default class ConfigProvider {
       ...(resolved.label ? { label: resolved.label } : {}),
     });
     const bootstrapped = takeTenantBootstrap(key);
+    const keys = await this.#tenantKeyring(config, logger);
     const client: TenantClient =
       bootstrapped ??
       createTenantClient({
+        ...(keys ? { keys } : {}),
+        ...(config.tenant.registerKey !== undefined
+          ? { registerKeys: config.tenant.registerKey }
+          : {}),
         url: config.tenant.url,
         partition: config.tenant.partition,
         token: config.tenant.token,
@@ -146,6 +152,9 @@ export default class ConfigProvider {
       // Ace commands must not open a stream or start polling; they only need the values once.
       if (this.#isConsole()) await client.load();
       else await client.start();
+    } else if (keys) {
+      // The bootstrap phase built the client before the app root existed: attach the keyring now.
+      await client.useKeys(keys);
     }
     client.onChange((change) => {
       if (change.reloadable.length > 0) {
@@ -171,6 +180,7 @@ export default class ConfigProvider {
       environment: status.environment,
       app: status.app,
       client,
+      ...(keys ? { keys } : {}),
       secrets: false,
       localEnv: status.localEnv,
       get: (k, fallback) => client.get(k, fallback),
@@ -180,6 +190,36 @@ export default class ConfigProvider {
     this.#runtime = runtime;
     setRuntime(runtime);
     return runtime;
+  }
+
+  /**
+   * The app's own X25519 keyring. Its private keys are sealed with the same crypto kit as the
+   * server's secrets (APP_KEY), and only the public halves ever go to the control plane. Without a
+   * usable key there is no keyring: entries sealed to this app stay masked.
+   */
+  async #tenantKeyring(
+    config: TenantTopologyConfig,
+    logger: { info(message: string): void; warn(message: string): void },
+  ): Promise<TenantKeyring | undefined> {
+    if (config.tenant.keyPath === false) return undefined;
+    const relative = config.tenant.keyPath ?? DEFAULT_TENANT_KEY_PATH;
+    const codec = this.#secretCodec(undefined);
+    if (!codec) {
+      logger.warn(
+        '[@adonis-agora/config] no APP_KEY: this app cannot hold an X25519 key, so secrets sealed to it stay unreadable',
+      );
+      return undefined;
+    }
+    try {
+      return await TenantKeyring.load({
+        path: this.app.makePath(relative),
+        codec,
+        aad: `config:tenant-key:${config.tenant.partition}`,
+      });
+    } catch (error) {
+      logger.warn(`[@adonis-agora/config] tenant keyring unavailable: ${(error as Error).message}`);
+      return undefined;
+    }
   }
 
   async #server(

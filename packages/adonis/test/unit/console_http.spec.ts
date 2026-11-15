@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigAdmin } from '../../src/admin.js';
+import { entryAad } from '../../src/crypto/secrets.js';
+import { generateKeyPair, openWith } from '../../src/crypto-kit/index.js';
 import { ConfigConsole } from '../../src/dashboard/console.js';
 import {
   type ConfigConsoleConfig,
@@ -260,6 +262,53 @@ describe('config console API', () => {
     });
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/value or vault/);
+  });
+
+  it('seals an entry for the app and never offers a reveal', async () => {
+    const { base, auth, store } = await start();
+    const pair = generateKeyPair('x25519');
+    await store.registerTenantKey?.({
+      app: 'shop',
+      kid: pair.publicKey.kid,
+      publicKey: pair.publicKey,
+      active: true,
+      createdAt: new Date().toISOString(),
+      createdBy: 'test',
+    });
+
+    const put = await fetch(`${base}/api/entries/p?app=shop`, {
+      method: 'PUT',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 'hunter2', sealedTo: true }),
+    });
+    expect(put.status).toBe(200);
+    const body = await put.json();
+    expect(body.entry).toMatchObject({ masked: true, sealedTo: { app: 'shop' } });
+    expect(body.entry.value).toBeUndefined();
+
+    const reveal = await fetch(`${base}/api/entries/p/reveal?app=shop`, {
+      method: 'POST',
+      headers: auth,
+    });
+    const revealed = await reveal.json();
+    expect(revealed).toMatchObject({ masked: true, sealedTo: { app: 'shop' } });
+    expect(revealed.value).toBeUndefined();
+
+    const stored = (await store.read(testScope))!.entries.p;
+    expect(
+      JSON.parse(
+        openWith([pair.privateKey], stored.value as string, {
+          aad: entryAad(testScope, 'p'),
+        }),
+      ),
+    ).toBe('hunter2');
+
+    const badFlag = await fetch(`${base}/api/entries/p?app=shop`, {
+      method: 'PUT',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 'x', sealedTo: 'yes' }),
+    });
+    expect(badFlag.status).toBe(400);
   });
 
   it('limits the console to the configured apps', async () => {

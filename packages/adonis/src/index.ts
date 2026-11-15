@@ -16,6 +16,7 @@ export {
   type ConfigEntryState,
   type ConfigEntryView,
   type ConfigScope,
+  type ConfigSealedTo,
   type ConfigSnapshot,
   type ConfigValue,
   DEFAULT_ENVIRONMENT,
@@ -45,6 +46,14 @@ export {
   keyringCodec,
   type SecretCodec,
 } from './crypto/secrets.js';
+export {
+  activeTenantKey,
+  normalizePublicKey,
+  registerTenantKeys,
+  resealTenantEntries,
+  sealForApp,
+  type TenantResealUpdate,
+} from './crypto/tenant_keys.js';
 export { type ConsoleActor, consoleActor } from './dashboard/actor.js';
 export {
   anyAuthorize,
@@ -91,6 +100,7 @@ export { MemoryStore } from './store/memory_store.js';
 export type {
   ConfigStore,
   StorePage,
+  TenantPublicKey,
   TouchedEntry,
   VersionSummary,
   WriteContext,
@@ -100,8 +110,15 @@ export {
   createTenantClient,
   TenantClient,
   type TenantClientOptions,
+  type TenantKeyStatus,
   type TenantStatus,
 } from './topology/tenant_client.js';
+export {
+  DEFAULT_TENANT_KEY_PATH,
+  TenantKeyring,
+  type TenantKeyringOptions,
+  type TenantKeyringStatus,
+} from './topology/tenant_keyring.js';
 export { resolveTenantToken, type TenantToken, type TenantTokenSource } from './topology/token.js';
 export {
   bearerToken,

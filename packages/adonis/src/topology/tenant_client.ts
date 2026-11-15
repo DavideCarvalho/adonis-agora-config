@@ -10,6 +10,8 @@ import {
   envValueOf,
   unflattenObject,
 } from '@adonis-agora/config-core';
+import { entryAad } from '../crypto/secrets.js';
+import type { TenantKeyring } from './tenant_keyring.js';
 import { resolveTenantToken, type TenantToken, type TenantTokenSource } from './token.js';
 
 /** What changed in one update, split by whether the app may apply it without a restart. */
@@ -40,6 +42,25 @@ export interface TenantStatus {
   snapshotPath?: string;
   /** `process.env` is overriding remote values for the keys it sets (`tenant.localEnv`). */
   localEnv: boolean;
+  /** Sealed-secret state: the app key and how the entries sealed to it stand. */
+  keys?: TenantKeyStatus;
+}
+
+/** How an app's sealed secrets stand: what it holds, and what it could not open. */
+export interface TenantKeyStatus {
+  /** The kid new `sealTo` writes use. */
+  activeKid: string;
+  kids: string[];
+  /** Whether the control plane knows this app's public keys (null: never tried). */
+  registered: boolean | null;
+  /** Entries the server sent sealed to this app (opened or not). */
+  sealed: number;
+  /** Sealed entries whose private key is missing, or whose AAD no longer matches. */
+  unreadable: number;
+  /** Sealed entries still using a retired key: the CLI re-seals them to the active one. */
+  staleKids: string[];
+  /** Why the last registration failed, when it did. */
+  error?: string;
 }
 
 export interface TenantClientOptions {
@@ -53,6 +74,13 @@ export interface TenantClientOptions {
   /** Default `main`. */
   label?: string;
   snapshotPath?: string;
+  /**
+   * The app's own X25519 keyring. Entries sealed to this app (`sealedTo`) are opened with it before
+   * they reach `values()`/`nested()`; the public half is registered with the control plane.
+   */
+  keys?: TenantKeyring;
+  /** Publish `keys` to the control plane on connect. Default `true` when `keys` is set. */
+  registerKeys?: boolean;
   stream?: boolean;
   intervalMs?: number;
   /** Throw when the server is unreachable AND no snapshot exists. Default `false`. */
@@ -146,10 +174,15 @@ export class TenantClient {
   #timer: NodeJS.Timeout | undefined;
   #streamAbort: AbortController | undefined;
   #refreshing: Promise<boolean> | undefined;
+  #keys: TenantKeyring | undefined;
+  #keysRegistered: boolean | null = null;
+  #keysError: string | undefined;
+  #sealed = { sealed: 0, unreadable: 0, staleKids: [] as string[] };
 
   constructor(private readonly options: TenantClientOptions) {
     this.#token = resolveTenantToken(options.token);
     this.#fetch = options.fetch ?? fetch;
+    this.#keys = options.keys;
   }
 
   get app(): string {
@@ -207,6 +240,7 @@ export class TenantClient {
       this.#boot = {};
       this.#live = {};
     }
+    if (this.#keys && this.options.registerKeys !== false) await this.registerKeys();
   }
 
   /** Loads the configuration and keeps it fresh (stream + polling). */
@@ -313,6 +347,142 @@ export class TenantClient {
       streaming: this.#streaming,
       ...(this.options.snapshotPath ? { snapshotPath: this.options.snapshotPath } : {}),
       localEnv: this.options.localEnv === true,
+      ...(this.#keys ? { keys: this.keyStatus() } : {}),
+    };
+  }
+
+  /** The sealed-secret state of this app (doctor, CLI and status()). */
+  keyStatus(): TenantKeyStatus {
+    const status = this.#keys?.status() ?? { activeKid: '', kids: [], path: '' };
+    return {
+      ...status,
+      registered: this.#keysRegistered,
+      ...(this.#keysError !== undefined ? { error: this.#keysError } : {}),
+      ...this.#sealed,
+    };
+  }
+
+  /**
+   * Uses a keyring built after this client (the bootstrap phase has no app root). Re-registers and
+   * refreshes, so already-received sealed entries are opened.
+   */
+  async useKeys(keys: TenantKeyring): Promise<void> {
+    this.#keys = keys;
+    this.#keysRegistered = null;
+    await this.registerKeys();
+    await this.refresh();
+  }
+
+  /**
+   * Publishes this app's public keys (never the private ones) so the control plane can seal values
+   * to it. Best effort: a failure is logged and retried on the next `load()`, never fatal.
+   */
+  async registerKeys(): Promise<boolean> {
+    const keys = this.#keys;
+    if (!keys) return false;
+    const send = async () => {
+      const headers = await this.#headers();
+      headers.authorization = await this.#authorization();
+      headers['content-type'] = 'application/json';
+      return this.#fetch(`${this.#base}/v1/keys`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ active: keys.activeKid, keys: keys.publicKeys() }),
+      });
+    };
+    try {
+      let response = await send();
+      if (response.status === 401) {
+        this.#token.reset?.();
+        response = await send();
+      }
+      if (!response.ok) throw new Error(`control plane answered ${response.status}`);
+      this.#keysRegistered = true;
+      this.#keysError = undefined;
+      return true;
+    } catch (error) {
+      this.#keysRegistered = false;
+      this.#keysError = error instanceof Error ? error.message : String(error);
+      this.options.logger?.warn(
+        `[@adonis-agora/config] ${this.app}: could not register the public key (${this.#keysError}); secrets sealed to it stay unreadable at the server`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Re-seals the entries sealed to a retired key with the active one and sends the ciphertext
+   * back. The control plane never opens it: only this app could, and only this app can re-seal it.
+   */
+  async resealSealed(options: { dryRun?: boolean } = {}): Promise<{
+    dryRun: boolean;
+    scanned: number;
+    resealed: number;
+    skipped: number;
+    version: number;
+  }> {
+    const keys = this.#keys;
+    const document = this.#document;
+    if (!keys) throw new Error('config: this app has no tenant keyring');
+    if (!document) throw new Error('config: the configuration has not been loaded yet');
+    const updates: Array<{ key: string; value: string; kid: string }> = [];
+    let scanned = 0;
+    let skipped = 0;
+    for (const [key, entry] of Object.entries(document.entries)) {
+      if (entry.sealedTo === undefined) continue;
+      scanned += 1;
+      if (entry.sealedTo.kid === keys.activeKid) {
+        skipped += 1;
+        continue;
+      }
+      if (entry.value === undefined) {
+        skipped += 1;
+        continue;
+      }
+      updates.push({
+        key,
+        kid: keys.activeKid,
+        value: keys.seal(JSON.stringify(entry.value), entryAad(document, key)),
+      });
+    }
+    if (options.dryRun === true || updates.length === 0) {
+      return {
+        dryRun: options.dryRun === true,
+        scanned,
+        resealed: 0,
+        skipped,
+        version: document.version,
+      };
+    }
+    const send = async () => {
+      const headers = await this.#headers();
+      headers.authorization = await this.#authorization();
+      headers['content-type'] = 'application/json';
+      return this.#fetch(`${this.#base}/v1/sealed`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ version: document.version, entries: updates }),
+      });
+    };
+    let response = await send();
+    if (response.status === 401) {
+      this.#token.reset?.();
+      response = await send();
+    }
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(
+        `config: the control plane refused the re-seal (${response.status}${body.error ? `: ${body.error}` : ''})`,
+      );
+    }
+    const result = (await response.json()) as { version: number };
+    await this.refresh();
+    return {
+      dryRun: false,
+      scanned,
+      resealed: updates.length,
+      skipped,
+      version: result.version,
     };
   }
 
@@ -372,7 +542,10 @@ export class TenantClient {
     }
   }
 
-  async #apply(document: ConfigDocumentView): Promise<boolean> {
+  async #apply(raw: ConfigDocumentView): Promise<boolean> {
+    // The snapshot always keeps what the server sent (ciphertext for sealed values); only the
+    // in-memory document is opened.
+    const document = this.#resolveSealed(raw);
     this.#document = document;
     const first = this.#boot === null;
     const previous = this.entries();
@@ -388,7 +561,7 @@ export class TenantClient {
         `[@adonis-agora/config] ${this.app}/${this.environment}/${this.label}: ${Object.keys(masked.entries).length} entries at v${document.version}`,
       );
       if (this.options.env) this.#applyEnv();
-      await this.#snapshot(masked);
+      await this.#snapshot(raw);
       return true;
     }
 
@@ -402,6 +575,7 @@ export class TenantClient {
         JSON.stringify(before?.value ?? null) !== JSON.stringify(after?.value ?? null) ||
         (before?.masked ?? false) !== (after?.masked ?? false) ||
         before?.vault !== after?.vault ||
+        before?.sealedTo?.kid !== after?.sealedTo?.kid ||
         before?.reloadable !== after?.reloadable;
       if (changed) changes.push(key);
     }
@@ -437,8 +611,57 @@ export class TenantClient {
       );
     }
     if (this.options.env) this.#applyEnv();
-    await this.#snapshot(masked);
+    await this.#snapshot(raw);
     return reloadable.length > 0 || restartRequired.length > 0;
+  }
+
+  /**
+   * Opens every entry the server sealed to this app with its private key. An entry that cannot be
+   * opened is withheld (masked) and counted: never served as ciphertext to the app's config.
+   */
+  #resolveSealed(document: ConfigDocumentView): ConfigDocumentView {
+    const keys = this.#keys;
+    const sealedEntries = Object.entries(document.entries).filter(
+      ([, entry]) => entry.sealedTo !== undefined,
+    );
+    if (sealedEntries.length === 0) {
+      this.#sealed = { sealed: 0, unreadable: 0, staleKids: [] };
+      return document;
+    }
+    const entries = { ...document.entries };
+    const stale = new Set<string>();
+    let unreadable = 0;
+    for (const [key, entry] of sealedEntries) {
+      if (entry.sealedTo !== undefined && entry.sealedTo.kid !== keys?.activeKid) {
+        stale.add(entry.sealedTo.kid);
+      }
+      const hide = () => {
+        const { value: _value, ...rest } = entry;
+        return { ...rest, masked: true };
+      };
+      if (!keys) {
+        unreadable += 1;
+        entries[key] = hide();
+        continue;
+      }
+      if (typeof entry.value !== 'string') {
+        unreadable += 1;
+        entries[key] = hide();
+        continue;
+      }
+      try {
+        const plain = keys.open(entry.value, entryAad(document, key));
+        entries[key] = { ...entry, value: JSON.parse(plain), masked: false };
+      } catch (error) {
+        unreadable += 1;
+        entries[key] = hide();
+        this.options.logger?.warn(
+          `[@adonis-agora/config] ${this.app}: sealed entry "${key}" did not open (${(error as Error).message})`,
+        );
+      }
+    }
+    this.#sealed = { sealed: sealedEntries.length, unreadable, staleKids: [...stale] };
+    return { ...document, entries };
   }
 
   #emit(change: ConfigChangeSet): void {
@@ -476,7 +699,8 @@ export class TenantClient {
     if (!path) return;
     try {
       const [text, info] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
-      const document = JSON.parse(text) as ConfigDocumentView;
+      const raw = JSON.parse(text) as ConfigDocumentView;
+      const document = this.#resolveSealed(raw);
       this.#document = document;
       this.#boot = { ...document.entries };
       this.#live = {};

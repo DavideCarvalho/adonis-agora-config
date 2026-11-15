@@ -285,4 +285,70 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
       };
     },
   },
+  {
+    id: 'config.tenant-key',
+    lib: 'config',
+    title: 'Sealed secrets: the app key',
+    cost: 'deep',
+    run: async (app): Promise<AgoraDoctorResult> => {
+      const config = app.config.get<ConfigConfig | undefined>('config');
+      if (!config || config.topology !== 'tenant') {
+        return {
+          status: 'skip',
+          message: 'Only a tenant holds the private key secrets are sealed to.',
+        };
+      }
+      if (config.tenant.keyPath === false) {
+        return {
+          status: 'ok',
+          message: 'tenant.keyPath is false: this app receives no sealed secrets.',
+        };
+      }
+      if (!hasRuntime()) {
+        return { status: 'skip', message: 'The config runtime is not built yet.' };
+      }
+      const runtime = getRuntime();
+      if (!runtime.keys) {
+        return {
+          status: 'warn',
+          message:
+            'No tenant keyring: APP_KEY is missing, so the app cannot hold the X25519 key sealed values need.',
+          fix: 'Set APP_KEY (the private key is sealed with it at rest), or set tenant.keyPath: false if this app never receives sealed secrets.',
+          docs: `${DOCS}/secrets#sealed-to-an-app`,
+        };
+      }
+      const status = runtime.client?.keyStatus();
+      if (!status) {
+        return { status: 'skip', message: 'The tenant client is not running.' };
+      }
+      if (status.unreadable > 0) {
+        return {
+          status: 'error',
+          message: `${status.unreadable} sealed secret(s) could not be opened (missing private key, changed APP_KEY, or a copied key file).`,
+          fix: 'Restore the old private key in the key file, or ask an operator to re-write the entry so it is sealed to the active key.',
+          docs: `${DOCS}/secrets#sealed-to-an-app`,
+        };
+      }
+      if (status.registered === false) {
+        return {
+          status: 'warn',
+          message: `The public key ${status.activeKid} is not registered with the control plane${status.error ? ` (${status.error})` : ''}.`,
+          fix: 'Run `node ace config:tenant:key` (or check the token/URL) so operators can seal values to this app.',
+          docs: `${DOCS}/secrets#sealed-to-an-app`,
+        };
+      }
+      if (status.staleKids.length > 0) {
+        return {
+          status: 'warn',
+          message: `${status.sealed - status.unreadable} sealed secret(s) still use retired key(s): ${status.staleKids.join(', ')}.`,
+          fix: 'Run `node ace config:tenant:key --reseal` to seal them to the active key.',
+          docs: `${DOCS}/secrets#sealed-to-an-app`,
+        };
+      }
+      return {
+        status: 'ok',
+        message: `${status.sealed} sealed secret(s) on active key ${status.activeKid}.`,
+      };
+    },
+  },
 ];

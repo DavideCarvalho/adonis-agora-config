@@ -14,6 +14,7 @@ import {
   parseVaultReference,
 } from '@adonis-agora/config-core';
 import { offsetPage } from '@adonis-agora/filter';
+import { sealForApp } from './crypto/tenant_keys.js';
 import type { VaultResolver } from './define_config.js';
 import type { ConfigStore, VersionSummary } from './store/store.js';
 
@@ -115,6 +116,7 @@ export class ConfigAdmin {
         {
           ...(entry.value !== undefined ? { value: entry.value } : {}),
           ...(entry.vault !== undefined ? { vault: entry.vault } : {}),
+          ...(entry.sealedTo !== undefined ? { sealedTo: entry.sealedTo } : {}),
           secret: entry.secret,
           reloadable: entry.reloadable,
           ...(entry.description !== undefined ? { description: entry.description } : {}),
@@ -176,7 +178,8 @@ export class ConfigAdmin {
     const document = await this.store.read(scope);
     const entry = document?.entries[key];
     if (!entry) return null;
-    if (options.reveal && (entry.secret || entry.vault !== undefined)) {
+    // A sealed value has no reveal: the console never asks for it, and a reveal row would lie.
+    if (options.reveal && (entry.secret || entry.vault !== undefined) && !entry.sealedTo) {
       await this.store.recordReveal(scope, key, document!.version, options.reveal.actor);
     }
     if (entry.vault !== undefined && options.canReadSecrets && this.#vault) {
@@ -198,13 +201,45 @@ export class ConfigAdmin {
     input: Omit<ConfigEntryInput, 'key'>,
     options: SetEntryOptions,
   ): Promise<{ version: number; changed: boolean }> {
-    const result = await this.store.write(scope, [{ key, ...input }], {
+    const prepared = await this.#sealIfRequested(scope, key, input);
+    const result = await this.store.write(scope, [{ key, ...prepared }], {
       actor: options.actor,
       now: options.now ?? new Date().toISOString(),
       ...(options.message !== undefined ? { message: options.message } : {}),
     });
     if (result.changed) this.#onChange?.(scope, result.document.version);
     return { version: result.document.version, changed: result.changed };
+  }
+
+  /**
+   * Turns `sealedTo: true` into ciphertext for the scope app's active public key. The plaintext
+   * never reaches the store, and there is no way back: the control plane cannot open the result.
+   */
+  async #sealIfRequested(
+    scope: ConfigScope,
+    key: string,
+    input: Omit<ConfigEntryInput, 'key'>,
+  ): Promise<Omit<ConfigEntryInput, 'key'>> {
+    if (input.sealedTo === undefined || input.sealedTo === false) {
+      const { sealedTo: _sealedTo, ...rest } = input;
+      return rest;
+    }
+    if (input.vault !== undefined) {
+      throw new Error('config: a sealed entry takes a value, not a vault reference');
+    }
+    if (input.value === undefined) {
+      throw new Error('config: a sealed entry needs a value to seal');
+    }
+    if (typeof input.sealedTo === 'object') {
+      throw new Error('config: pass `sealedTo: true`; the admin resolves the app key');
+    }
+    const sealed = await sealForApp(this.store, scope, key, input.value);
+    return {
+      ...input,
+      value: sealed.value,
+      sealedTo: sealed.sealedTo,
+      secret: true,
+    };
   }
 
   async unsetEntry(
@@ -351,6 +386,9 @@ export class ConfigAdmin {
     const out: Record<string, ConfigValue> = {};
     for (const [key, entry] of Object.entries(view?.entries ?? {})) {
       if (entry.value === undefined) continue;
+      // A sealed value is ciphertext here: only the target app can open it, so `config:env`
+      // and the MCP tools never print it.
+      if (entry.sealedTo !== undefined) continue;
       if (canReadSecrets && options.reveal && (entry.secret || entry.vault !== undefined)) {
         await this.store.recordReveal(scope, key, view?.version ?? 0, options.reveal.actor);
       }

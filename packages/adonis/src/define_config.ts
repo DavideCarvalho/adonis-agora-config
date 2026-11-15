@@ -143,6 +143,14 @@ export interface TenantTopologyConfig extends BaseConfig {
      * ports after `sail:sync-env`: the config server's `db.port` never shadows them in dev.
      */
     localEnv?: boolean;
+    /**
+     * Where this app's X25519 private key lives, relative to the app root. Default
+     * `storage/config-tenant-key.json`; the file is created (mode 0600) on first boot and the
+     * private key is sealed with APP_KEY. `false` turns sealed secrets off for this app.
+     */
+    keyPath?: string | false;
+    /** Publish the public key to the control plane on connect. Default `true` when `keyPath` is on. */
+    registerKey?: boolean;
   };
   /** FORBIDDEN on a tenant: it owns no configuration; it reads the control plane's. */
   store?: never;

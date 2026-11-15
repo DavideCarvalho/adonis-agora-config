@@ -16,6 +16,7 @@ export function fingerprintOf(entries: Record<string, ConfigEntryState>): string
           {
             value: entry.value ?? null,
             vault: entry.vault ?? null,
+            sealedTo: entry.sealedTo ?? null,
             secret: entry.secret,
             reloadable: entry.reloadable,
             description: entry.description ?? null,

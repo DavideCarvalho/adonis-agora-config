@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ConfigConfig } from '../../src/define_config.js';
 import { agoraDoctorChecks } from '../../src/doctor/checks.js';
 import { ControlPlane } from '../../src/http/control_plane.js';
+import { setRuntime } from '../../src/services/accessor.js';
 import { memoryConfig } from '../../src/testing/index.js';
 import { sharedSecretVerifier } from '../../src/topology/verify.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
@@ -23,6 +24,7 @@ const env = { ...process.env };
 
 afterEach(async () => {
   process.env = { ...env };
+  setRuntime(undefined);
   await Promise.all(
     servers
       .splice(0)
@@ -200,6 +202,77 @@ describe('config doctor checks', () => {
     expect(await check('config.crypto').run(fakeApp(withKeys, root))).toMatchObject({
       status: 'ok',
       message: expect.stringContaining('crypto keys'),
+    });
+  });
+
+  it('reports the tenant sealed-secret key: off, missing, unreadable or retired', async () => {
+    const root = await workspace();
+    const off = {
+      topology: 'tenant',
+      tenant: {
+        url: 'http://127.0.0.1:1/_config',
+        partition: 'shop',
+        token: 'x',
+        keyPath: false,
+      },
+    } as ConfigConfig;
+    expect(await check('config.tenant-key').run(fakeApp(off, root))).toMatchObject({
+      status: 'ok',
+      message: expect.stringContaining('keyPath is false'),
+    });
+
+    const enabled = tenant('http://127.0.0.1:1/_config');
+    setRuntime({
+      topology: 'tenant',
+      environment: 'production',
+      app: 'shop',
+      secrets: false,
+      localEnv: false,
+      get: () => undefined,
+      all: () => ({}),
+      status: () => undefined,
+    } as never);
+    expect(await check('config.tenant-key').run(fakeApp(enabled, root))).toMatchObject({
+      status: 'warn',
+      fix: expect.stringContaining('APP_KEY'),
+    });
+
+    const withStatus = (keys: Record<string, unknown>): ConfigConfig => enabled;
+    const status = (value: Record<string, unknown>) => ({
+      topology: 'tenant',
+      environment: 'production',
+      app: 'shop',
+      keys: {},
+      secrets: false,
+      localEnv: false,
+      get: () => undefined,
+      all: () => ({}),
+      status: () => undefined,
+      client: { keyStatus: () => ({ kids: ['k'], activeKid: 'k', ...value }) },
+    });
+
+    setRuntime(status({ unreadable: 2, sealed: 2 }) as never);
+    expect(await check('config.tenant-key').run(fakeApp(withStatus({}), root))).toMatchObject({
+      status: 'error',
+      message: expect.stringContaining('2 sealed secret(s)'),
+    });
+
+    setRuntime(status({ unreadable: 0, sealed: 2, registered: false }) as never);
+    expect(await check('config.tenant-key').run(fakeApp(withStatus({}), root))).toMatchObject({
+      status: 'warn',
+      fix: expect.stringContaining('config:tenant:key'),
+    });
+
+    setRuntime(status({ unreadable: 0, sealed: 2, registered: true, staleKids: ['old'] }) as never);
+    expect(await check('config.tenant-key').run(fakeApp(withStatus({}), root))).toMatchObject({
+      status: 'warn',
+      fix: expect.stringContaining('--reseal'),
+    });
+
+    setRuntime(status({ unreadable: 0, sealed: 2, registered: true, staleKids: [] }) as never);
+    expect(await check('config.tenant-key').run(fakeApp(withStatus({}), root))).toMatchObject({
+      status: 'ok',
+      message: expect.stringContaining('active key k'),
     });
   });
 });

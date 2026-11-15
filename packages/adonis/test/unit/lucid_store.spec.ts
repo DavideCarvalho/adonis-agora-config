@@ -6,6 +6,9 @@ import { AppFactory } from '@adonisjs/core/factories/app';
 import { LoggerFactory } from '@adonisjs/core/factories/logger';
 import { Database } from '@adonisjs/lucid/database';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ConfigAdmin } from '../../src/admin.js';
+import { entryAad } from '../../src/crypto/secrets.js';
+import { generateKeyPair, openWith, SealedValueError } from '../../src/crypto-kit/index.js';
 import { query, type SqlDatabase } from '../../src/sql.js';
 import { LucidStore } from '../../src/store/lucid_store.js';
 import { testScope, testSecretCodec } from '../../src/testing/index.js';
@@ -55,6 +58,64 @@ async function store(): Promise<LucidStore> {
 }
 
 describe('LucidStore', () => {
+  it('keeps tenant public keys and stores sealed values as opaque ciphertext', async () => {
+    const { db } = await sqlite();
+    const s = new LucidStore(db, { secretCodec: testSecretCodec('lucid-test-key'), now: () => at });
+    await s.setup();
+
+    const first = generateKeyPair('x25519');
+    const second = generateKeyPair('x25519');
+    await s.registerTenantKey({
+      app: 'shop',
+      kid: first.publicKey.kid,
+      publicKey: first.publicKey,
+      active: true,
+      createdAt: at,
+      createdBy: 'test',
+    });
+    await s.registerTenantKey({
+      app: 'shop',
+      kid: second.publicKey.kid,
+      publicKey: second.publicKey,
+      active: true,
+      createdAt: at,
+      createdBy: 'test',
+    });
+    const keys = await s.listTenantKeys('shop');
+    expect(keys.map((key) => key.kid).sort()).toEqual(
+      [first.publicKey.kid, second.publicKey.kid].sort(),
+    );
+    expect(keys.filter((key) => key.active).map((key) => key.kid)).toEqual([second.publicKey.kid]);
+
+    // A second store instance over the same database sees the registered keys.
+    const reopened = new LucidStore(db, {
+      secretCodec: testSecretCodec('lucid-test-key'),
+      now: () => at,
+    });
+    await reopened.setup();
+    expect(await reopened.listTenantKeys('shop')).toHaveLength(2);
+
+    const admin = new ConfigAdmin({ store: reopened });
+    await admin.setEntry(
+      testScope,
+      'p',
+      { value: 'hunter2', sealedTo: true },
+      { actor: 'ann', now: at },
+    );
+    const stored = (await reopened.read(testScope))!.entries.p;
+    expect(stored.sealedTo).toEqual({ app: 'shop', kid: second.publicKey.kid });
+    expect((stored.value as string).startsWith('agora:pk1:')).toBe(true);
+    // The control plane has no private key; only the app (holding both keys) opens it.
+    expect(() => openWith([], stored.value as string)).toThrow(SealedValueError);
+    expect(
+      JSON.parse(
+        openWith([second.privateKey], stored.value as string, {
+          aad: entryAad(testScope, 'p'),
+        }),
+      ),
+    ).toBe('hunter2');
+  });
+
   it('creates its tables and versions writes', async () => {
     const s = await store();
     const one = await s.write(testScope, [{ key: 'a', value: 1 }], { actor: 'ann', now: at });

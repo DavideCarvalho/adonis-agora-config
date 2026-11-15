@@ -32,7 +32,7 @@ a lazy import. `authorizeByToken`, `anyAuthorize` and `resolveConsoleAuthorize` 
 | Page | |
 | --- | --- |
 | **Entries** | every key of the selected app/environment/label, with its value, secret and reloadable flags, who last wrote it and when. Search, filter and paginate. |
-| **Editor** | set a value (JSON or text), a `vault://` reference, description and the reason; a secret is encrypted at rest, a reloadable key applies without a restart. |
+| **Editor** | set a value (JSON or text), a `vault://` reference, description and the reason; a secret is encrypted at rest, **seal for <app>** hands it to the tenant's key so the server cannot read it, a reloadable key applies without a restart. |
 | **History** | every immutable version: who, when, how many entries and secrets, and why. |
 | **Diff** | any two versions, key by key: added, removed, changed, with secret values masked. |
 | **Rollback** | copies a past version into a new version (history stays append-only), with the reason recorded. |
@@ -40,7 +40,8 @@ a lazy import. `authorizeByToken`, `anyAuthorize` and `resolveConsoleAuthorize` 
 
 A secret arrives **masked** in the console. The operator asks for it explicitly (the eye button),
 which calls `POST <api>/entries/:key/reveal` and writes a `reveal` audit row; `revealSecrets: false`
-removes the button entirely.
+removes the button entirely. An entry sealed for an app says **sealed for <app>** and has no reveal:
+the control plane holds only ciphertext, and only that app's private key opens it.
 
 ## The JSON API
 

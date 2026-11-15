@@ -9,12 +9,28 @@
 export type ConfigScalar = string | number | boolean | null;
 export type ConfigValue = ConfigScalar | ConfigValue[] | { [key: string]: ConfigValue };
 
+/**
+ * The app whose X25519 public key a value was sealed to (`sealTo`). The control plane can write it
+ * but never open it again: only that app's private key does.
+ */
+export interface ConfigSealedTo {
+  /** The app (partition) holding the private key. */
+  app: string;
+  /** The `kid` of the X25519 public key the value was sealed to. */
+  kid: string;
+}
+
 /** One entry as it is stored: the value (or a vault reference) plus its flags. */
 export interface ConfigEntryState {
   /** The value. Absent when the entry is a vault reference (see {@link vault}). */
   value?: ConfigValue;
   /** `vault://provider/path#field`: resolved when the value is read, never stored resolved. */
   vault?: string;
+  /**
+   * Present when the value is `agora:pk1:…` sealed to an app's public key. The store keeps it as
+   * opaque ciphertext: the control plane never opens it, and only the app named here can.
+   */
+  sealedTo?: ConfigSealedTo;
   /** A secret is encrypted at rest and only served to a `config:secrets:read` caller. */
   secret: boolean;
   /** Reloadable entries are applied on a running tenant; the rest need a restart. */
@@ -94,6 +110,12 @@ export interface ConfigEntryInput {
   key: string;
   value?: ConfigValue;
   vault?: string;
+  /**
+   * `true` seals the value to the scope app's registered X25519 public key (the control plane
+   * cannot read it afterwards); the config admin resolves it to the concrete {@link ConfigSealedTo}
+   * before the store sees it. A store rejects a bare `true`: it has no key registry.
+   */
+  sealedTo?: boolean | ConfigSealedTo;
   secret?: boolean;
   reloadable?: boolean;
   description?: string | null;
