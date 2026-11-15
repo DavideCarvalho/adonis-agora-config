@@ -79,7 +79,28 @@ async function controlPlane(token = 'good') {
   return { url: `${addressOf(server)}/_config`, fetches: () => fetches };
 }
 
+/** A `fetch` that behaves like the browser's: called with any `this` but the global, it throws. */
+const strictFetch = function (
+  this: unknown,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  if (this !== globalThis) throw new TypeError('Illegal invocation');
+  return fetch(input, init);
+} as unknown as typeof fetch;
+
 describe('ConfigClient', () => {
+  it('calls fetch bound to the global object (no Illegal invocation)', async () => {
+    const { url } = await controlPlane();
+    const client = await fetchConfig({
+      url,
+      partition: 'shop',
+      token: 'good',
+      fetch: strictFetch,
+    });
+    expect(client.get('db.host')).toBe('localhost');
+  });
+
   it('fetches a scope and exposes values, nested and status', async () => {
     const { url } = await controlPlane();
     const client = await fetchConfig({

@@ -127,8 +127,10 @@ export class ConfigConsole {
     const root = this.options.config.path === '' ? '' : this.options.config.path;
     const api = this.options.config.api;
 
+    // ONE route for the SPA. AdonisJS drops the trailing slash when it computes a route pattern, so
+    // `/<path>` and `/<path>/` are the same route: registering both dies at boot with "Duplicate
+    // route found". The single route also answers the trailing-slash URL.
     router.get(root === '' ? '/' : root, (ctx) => this.spa(ctx));
-    if (root !== '') router.get(`${root}/`, (ctx) => this.spa(ctx));
     router.get(`${root}/assets/:file`, (ctx) => this.asset(ctx));
 
     router.get(`${api}/meta`, (ctx) => this.#guarded(ctx, 'api', () => this.meta(ctx)));

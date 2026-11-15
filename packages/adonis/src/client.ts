@@ -72,7 +72,9 @@ export class ConfigClient {
     this.environment = options.environment ?? 'production';
     this.label = options.label ?? DEFAULT_LABEL;
     this.#token = resolveTenantToken(options.token);
-    this.#fetch = options.fetch ?? fetch;
+    // `fetch` is a method of `window` in the browser: invoking it as a method of this client
+    // (`this.#fetch(...)`) throws "Illegal invocation". Bind it to the global object once.
+    this.#fetch = (options.fetch ?? fetch).bind(globalThis);
   }
 
   #headers(): Promise<Record<string, string>> {
