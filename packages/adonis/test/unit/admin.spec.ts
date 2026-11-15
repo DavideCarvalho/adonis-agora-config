@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigAdmin } from '../../src/admin.js';
-import { secretCodec } from '../../src/crypto/secrets.js';
 import { MemoryStore } from '../../src/store/memory_store.js';
-import { seedConfig, testScope } from '../../src/testing/index.js';
+import { seedConfig, testScope, testSecretCodec } from '../../src/testing/index.js';
 
 const at = new Date('2026-03-03T03:03:03.000Z').toISOString();
 
 function admin(options: { reveal?: boolean; vault?: (ref: { path: string }) => unknown } = {}) {
-  const store = new MemoryStore({ secretCodec: secretCodec('admin-test') });
+  const store = new MemoryStore({ secretCodec: testSecretCodec('admin-test') });
   return {
     store,
     admin: new ConfigAdmin({
@@ -150,7 +149,7 @@ describe('ConfigAdmin', () => {
   });
 
   it('notifies the control plane bus after a write, and only then', async () => {
-    const store = new MemoryStore({ secretCodec: secretCodec('bus-test') });
+    const store = new MemoryStore({ secretCodec: testSecretCodec('bus-test') });
     const published: Array<{ app: string; version: number }> = [];
     const a = new ConfigAdmin({
       store,

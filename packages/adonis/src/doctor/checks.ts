@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ApplicationService } from '@adonisjs/core/types';
 import type { ConfigConfig, TenantTopologyConfig } from '../define_config.js';
+import { getRuntime, hasRuntime } from '../services/accessor.js';
 import { createTenantClient } from '../topology/tenant_client.js';
 import { resolveTenantToken } from '../topology/token.js';
 import type { AgoraDoctorCheck, AgoraDoctorResult } from './agora_doctor.js';
@@ -226,10 +227,10 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
     },
   },
   {
-    id: 'config.secrets-key',
+    id: 'config.crypto',
     lib: 'config',
-    title: 'Secrets encryption configured',
-    cost: 'cheap',
+    title: 'Secret encryption and rotation',
+    cost: 'deep',
     run: async (app): Promise<AgoraDoctorResult> => {
       const config = app.config.get<ConfigConfig | undefined>('config');
       if (!config || config.topology === 'tenant') {
@@ -238,20 +239,48 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
           message: 'A tenant reads secrets from the server; it has no key of its own.',
         };
       }
-      if (config.secrets?.codec) {
-        return { status: 'ok', message: 'A custom secrets codec is configured.' };
+      if (hasRuntime() && getRuntime().store?.cryptoStatus) {
+        try {
+          const counts = await getRuntime().store!.cryptoStatus!();
+          const broken = counts.unreadable;
+          const old = counts.retired + counts.legacy;
+          if (broken > 0) {
+            return {
+              status: 'error',
+              message: `${broken} stored secret(s) cannot be opened with the current keys.`,
+              fix: 'Restore the missing key in crypto.keys, or re-seal the values with `node ace config:crypto:reseal`.',
+              docs: `${DOCS}/secrets`,
+            };
+          }
+          if (old > 0) {
+            return {
+              status: 'warn',
+              message: `${counts.retired} retired and ${counts.legacy} legacy secret(s) need re-sealing.`,
+              fix: 'Run `node ace config:crypto:reseal` (add --dry-run to preview).',
+              docs: `${DOCS}/secrets`,
+            };
+          }
+          return {
+            status: 'ok',
+            message: `${counts.active} stored secret(s) use the active key.`,
+          };
+        } catch {
+          // A custom store without the scan falls through to the key-presence check.
+        }
       }
-      const container = app.container as { hasBinding?: (binding: string) => boolean } | undefined;
-      if (container?.hasBinding?.('encryption')) {
+      if (config.crypto?.keys?.length) {
+        return { status: 'ok', message: `${config.crypto.keys.length} crypto keys configured.` };
+      }
+      if (process.env.APP_KEY) {
         return {
           status: 'ok',
-          message: 'Secrets use the app encryption service (config/encryption.ts).',
+          message: 'Secrets use the default `app` key derived from APP_KEY.',
         };
       }
       return {
         status: 'warn',
-        message: 'No app encryption service: writing a secret will fail.',
-        fix: 'Configure config/encryption.ts (the AdonisJS encryption service) or pass controlPlane.secrets.codec.',
+        message: 'No APP_KEY and no crypto.keys: writing a secret will fail.',
+        fix: 'Set APP_KEY, or `crypto.keys` in config/config.ts.',
         docs: `${DOCS}/secrets`,
       };
     },

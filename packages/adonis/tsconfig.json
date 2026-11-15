@@ -15,5 +15,5 @@
     "commands/**/*.ts",
     "configure.ts"
   ],
-  "exclude": ["test/**", "dist/**"]
+  "exclude": ["test/**", "dist/**", "src/crypto-kit/*.cases.ts"]
 }

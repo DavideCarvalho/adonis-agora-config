@@ -1,65 +1,117 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import type { ConfigValue } from '@adonis-agora/config-core';
+import {
+  createKeyring,
+  type Keyring,
+  type KmsAdapter,
+  open,
+  reseal,
+  SEALED_PREFIX,
+  type SealedStatus,
+  type SecretLike,
+  seal,
+  sealedStatus,
+} from '../crypto-kit/index.js';
 
-const PREFIX = 'agora-config:v1:';
-const INFO = 'adonis-agora/config/secrets';
+/** Domain separation for every config secret: one APP_KEY never yields the same key twice. */
+export const CONFIG_SECRET_PURPOSE = 'config:secrets';
 
-/** Encrypts and decrypts the values of secret entries, at rest. */
-export interface SecretCodec {
-  /** Encrypts a JSON value into an opaque string safe to store in any text column. */
-  seal(value: ConfigValue): string;
-  /** Decrypts a string produced by {@link seal}. */
-  open(sealed: string): ConfigValue;
-  /** Whether `value` looks like this codec's output. */
-  owns(value: unknown): value is string;
+/** One key. The kit takes plain secrets; the id is how config names the active one. */
+export interface CryptoKey {
+  id: string;
+  secret: SecretLike;
 }
 
-/** The 32-byte AES key derived from a host secret (`APP_KEY`, a KMS-fetched key, …). */
-export function deriveKey(secret: string | Buffer | Uint8Array): Buffer {
-  const bytes = typeof secret === 'string' ? Buffer.from(secret, 'utf8') : Buffer.from(secret);
-  if (bytes.length === 0) throw new Error('@adonis-agora/config: the secrets key is empty');
-  return Buffer.from(hkdfSync('sha256', bytes, Buffer.alloc(0), INFO, 32));
+/** Rotation options. The first key seals; `active` names the one that seals, if not the first. */
+export interface CryptoOptions {
+  keys?: CryptoKey[];
+  active?: string;
+  /** Envelope encryption: values carry a data key wrapped by this adapter. */
+  kms?: KmsAdapter;
+}
+
+export interface SealOptions {
+  /** Additional authenticated data; the same string must be passed to `open`. */
+  aad?: string | undefined;
+}
+
+/** The store's view of encrypting one value (async: a KMS key answers over the network). */
+export interface SecretCodec {
+  seal(value: ConfigValue, options?: SealOptions): Promise<string>;
+  open(sealed: string, options?: SealOptions): Promise<ConfigValue>;
+  /** Whether a stored string is this codec's ciphertext. A secret is always one. */
+  owns(value: unknown): value is string;
+  status(sealed: string, options?: SealOptions): Promise<SealedStatus>;
+  reseal(sealed: string, options?: SealOptions): Promise<string>;
+}
+
+/** The AAD binding a value to its place: app/environment/key (copying it elsewhere fails to open). */
+export function entryAad(scope: { app: string; environment: string }, key: string): string {
+  return `config:${scope.app}:${scope.environment}:${key}`;
 }
 
 /**
- * AES-256-GCM with a fresh 12-byte IV per value. The ciphertext is
- * `agora-config:v1:<iv>:<tag>:<ciphertext>` (base64), so a value can be recognised in a dump and a
- * rotated key can be detected instead of silently decrypting to garbage.
+ * The keyring for config secrets: `crypto.keys` (newest first) with `crypto.active` naming the key
+ * that seals, or one `app` key derived from APP_KEY. The kit itself has no key ids, so `active` is
+ * honored by reordering the secrets before handing them to it.
  */
-export function secretCodec(key: string | Buffer | Uint8Array): SecretCodec {
-  const derived = deriveKey(key);
+export function createConfigKeyring(options: {
+  keys?: CryptoKey[] | undefined;
+  active?: string | undefined;
+  kms?: KmsAdapter | undefined;
+  appKey?: SecretLike | undefined;
+}): Keyring {
+  const configured =
+    options.keys?.length && options.keys.length > 0
+      ? options.keys
+      : [{ id: 'app', secret: options.appKey ?? '' }];
+  const activeId = options.active ?? configured[0]?.id;
+  const active = configured.find((key) => key.id === activeId);
+  if (!active) throw new Error(`crypto: active key "${activeId}" is not in crypto.keys`);
+  const ordered = [active, ...configured.filter((key) => key !== active)];
+  return createKeyring({
+    purpose: CONFIG_SECRET_PURPOSE,
+    keys: ordered.map((key) => key.secret),
+    ...(options.kms !== undefined ? { kms: options.kms } : {}),
+  });
+}
+
+/** Adapts the crypto kit to the store's {@link SecretCodec}. Values are JSON inside the ciphertext. */
+export function keyringCodec(keyring: Keyring): SecretCodec {
   return {
-    seal(value) {
-      const iv = randomBytes(12);
-      const cipher = createCipheriv('aes-256-gcm', derived, iv);
-      const plaintext = JSON.stringify(value);
-      const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-      return `${PREFIX}${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${ciphertext.toString('base64')}`;
+    async seal(value, options = {}) {
+      return seal(keyring, JSON.stringify(value), {
+        ...(options.aad !== undefined ? { aad: options.aad } : {}),
+      });
     },
-    open(sealed) {
-      if (!sealed.startsWith(PREFIX)) {
-        throw new Error('@adonis-agora/config: not an encrypted config value');
-      }
-      const [iv, tag, ciphertext] = sealed.slice(PREFIX.length).split(':');
-      if (!iv || !tag || ciphertext === undefined) {
-        throw new Error('@adonis-agora/config: malformed encrypted config value');
-      }
-      const decipher = createDecipheriv('aes-256-gcm', derived, Buffer.from(iv, 'base64'));
-      decipher.setAuthTag(Buffer.from(tag, 'base64'));
+    async open(sealed, options = {}) {
+      const text = await open(keyring, sealed, {
+        ...(options.aad !== undefined ? { aad: options.aad } : {}),
+      });
       try {
-        const plaintext = Buffer.concat([
-          decipher.update(Buffer.from(ciphertext, 'base64')),
-          decipher.final(),
-        ]).toString('utf8');
-        return JSON.parse(plaintext) as ConfigValue;
+        return JSON.parse(text) as ConfigValue;
       } catch {
-        throw new Error(
-          '@adonis-agora/config: cannot decrypt a secret — was the secrets key rotated without re-encrypting?',
-        );
+        throw new Error('@adonis-agora/config: the decrypted secret is not JSON');
       }
     },
     owns(value): value is string {
-      return typeof value === 'string' && value.startsWith(PREFIX);
+      // A secret value is always sealed. Treat every non-empty string as ciphertext so a plaintext
+      // value (written by another tool) fails loudly instead of being served as a secret.
+      return typeof value === 'string' && value !== '';
+    },
+    status(sealed, options = {}) {
+      return sealedStatus(keyring, sealed, {
+        ...(options.aad !== undefined ? { aad: options.aad } : {}),
+      });
+    },
+    reseal(sealed, options = {}) {
+      return reseal(keyring, sealed, {
+        ...(options.aad !== undefined ? { aad: options.aad } : {}),
+      });
     },
   };
+}
+
+/** Whether a stored string already looks like a crypto-kit value. */
+export function isKitValue(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith(SEALED_PREFIX);
 }

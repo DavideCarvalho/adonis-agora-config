@@ -4,14 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigAdmin } from '../../src/admin.js';
-import { secretCodec } from '../../src/crypto/secrets.js';
 import { ConfigConsole } from '../../src/dashboard/console.js';
 import {
   type ConfigConsoleConfig,
   resolveConsoleConfig,
 } from '../../src/dashboard/define_config.js';
 import { MemoryStore } from '../../src/store/memory_store.js';
-import { seedConfig, testScope } from '../../src/testing/index.js';
+import { seedConfig, testScope, testSecretCodec } from '../../src/testing/index.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
 
 interface Route {
@@ -65,7 +64,7 @@ async function start(
     apps?: string[];
   } = {},
 ) {
-  const store = new MemoryStore({ secretCodec: secretCodec('console-test') });
+  const store = new MemoryStore({ secretCodec: testSecretCodec('console-test') });
   await seedConfig(store, testScope, options.entries ?? [['db.host', 'localhost']]);
   const admin = new ConfigAdmin({
     store,

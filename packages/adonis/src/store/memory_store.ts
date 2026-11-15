@@ -7,13 +7,17 @@ import {
   type ConfigScope,
   fingerprintOf,
 } from '@adonis-agora/config-core';
-import type { SecretCodec } from '../crypto/secrets.js';
+import { entryAad, type SecretCodec } from '../crypto/secrets.js';
 import {
   applyChanges,
   auditRows,
   type ConfigStore,
+  type CryptoStatusCounts,
   countsOf,
   DocumentSealer,
+  emptyCryptoStatus,
+  type ResealReport,
+  resealStoredEntry,
   type StorePage,
   scopeKey,
   type TouchedEntry,
@@ -35,7 +39,7 @@ export class MemoryStore implements ConfigStore {
     this.#sealer = new DocumentSealer(options.secretCodec);
   }
 
-  #latest(scope: ConfigScope): ConfigDocument | null {
+  async #latest(scope: ConfigScope): Promise<ConfigDocument | null> {
     const sealed = this.#versions.get(scopeKey(scope))?.at(-1);
     return sealed ? this.#sealer.openDocument(sealed) : null;
   }
@@ -92,14 +96,21 @@ export class MemoryStore implements ConfigStore {
   ): Promise<{ document: ConfigDocument; changed: boolean; touched: TouchedEntry[] }> {
     const key = scopeKey(scope);
     const versions = this.#versions.get(key) ?? [];
-    const current = this.#latest(scope);
+    const current = await this.#latest(scope);
     const result = applyChanges(current, changes, context);
     const document = withScope(result.document, scope);
     if (result.changed) {
-      versions.push(this.#sealer.sealDocument(document));
+      versions.push(await this.#sealer.sealDocument(document));
       this.#versions.set(key, versions);
       this.#audit.push(
-        ...auditRows(scope, document.version, result.touched, context, this.#sealer, randomUUID),
+        ...(await auditRows(
+          scope,
+          document.version,
+          result.touched,
+          context,
+          this.#sealer,
+          randomUUID,
+        )),
       );
     }
     return { document, changed: result.changed, touched: result.touched };
@@ -112,7 +123,7 @@ export class MemoryStore implements ConfigStore {
   ): Promise<{ document: ConfigDocument; changed: boolean }> {
     const target = await this.readVersion(scope, toVersion);
     if (!target) throw new Error(`config: version ${toVersion} does not exist for ${scope.app}`);
-    const current = this.#latest(scope);
+    const current = await this.#latest(scope);
     const entries: Record<string, ConfigEntryState> = Object.fromEntries(
       Object.entries(target.entries).map(([key, entry]) => [
         key,
@@ -134,7 +145,7 @@ export class MemoryStore implements ConfigStore {
     };
     const key = scopeKey(scope);
     const versions = this.#versions.get(key) ?? [];
-    versions.push(this.#sealer.sealDocument(document));
+    versions.push(await this.#sealer.sealDocument(document));
     this.#versions.set(key, versions);
     this.#audit.push({
       id: randomUUID(),
@@ -164,10 +175,53 @@ export class MemoryStore implements ConfigStore {
           (filters.action === undefined || row.action === filters.action),
       );
     const start = (page.number - 1) * page.size;
-    return {
-      rows: matching.slice(start, start + page.size).map((row) => this.#sealer.openAudit(row)),
-      total: matching.length,
+    const rows = await Promise.all(
+      matching.slice(start, start + page.size).map((row) => this.#sealer.openAudit(row)),
+    );
+    return { rows, total: matching.length };
+  }
+
+  async #reseal(dryRun: boolean): Promise<ResealReport> {
+    const report: ResealReport = {
+      dryRun,
+      scanned: 0,
+      resealed: 0,
+      failed: 0,
+      statuses: emptyCryptoStatus(),
     };
+    const codec = this.#sealer.secretCodec;
+    if (!codec) return report;
+    for (const versions of this.#versions.values()) {
+      for (const document of versions) {
+        for (const [key, entry] of Object.entries(document.entries)) {
+          document.entries[key] = await resealStoredEntry(
+            entry,
+            entryAad(document, key),
+            codec,
+            dryRun,
+            report,
+          );
+        }
+      }
+    }
+    for (const record of this.#audit) {
+      const aad = entryAad(record, record.key ?? '');
+      if (record.before) {
+        record.before = await resealStoredEntry(record.before, aad, codec, dryRun, report);
+      }
+      if (record.after) {
+        record.after = await resealStoredEntry(record.after, aad, codec, dryRun, report);
+      }
+    }
+    return report;
+  }
+
+  async cryptoStatus(): Promise<CryptoStatusCounts> {
+    return (await this.#reseal(true)).statuses;
+  }
+
+  async reseal(options: { dryRun?: boolean } = {}): Promise<ResealReport> {
+    return this.#reseal(options.dryRun === true);
   }
 
   async recordReveal(

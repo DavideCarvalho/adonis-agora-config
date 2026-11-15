@@ -6,7 +6,7 @@ import {
   type ConfigEntryState,
   type ConfigScope,
 } from '@adonis-agora/config-core';
-import type { SecretCodec } from '../crypto/secrets.js';
+import { entryAad, type SecretCodec } from '../crypto/secrets.js';
 import {
   type Dialect,
   dialectOf,
@@ -21,8 +21,12 @@ import {
   applyChanges,
   auditRows,
   type ConfigStore,
+  type CryptoStatusCounts,
   countsOf,
   DocumentSealer,
+  emptyCryptoStatus,
+  type ResealReport,
+  resealStoredEntry,
   type StorePage,
   type TouchedEntry,
   type VersionSummary,
@@ -131,7 +135,21 @@ export class LucidStore implements ConfigStore {
     );
   }
 
-  #document(row: VersionRow): ConfigDocument {
+  #sealedDocument(row: VersionRow): ConfigDocument {
+    return {
+      app: row.app,
+      environment: row.environment,
+      label: row.label,
+      version: toNumber(row.version),
+      entries: parseJson<Record<string, ConfigEntryState>>(row.entries),
+      fingerprint: row.fingerprint,
+      createdAt: row.created_at,
+      createdBy: row.created_by,
+      ...(row.message ? { message: row.message } : {}),
+    };
+  }
+
+  async #document(row: VersionRow): Promise<ConfigDocument> {
     return this.#sealer.openDocument({
       app: row.app,
       environment: row.environment,
@@ -153,7 +171,7 @@ export class LucidStore implements ConfigStore {
        ORDER BY version DESC LIMIT 1`,
       [scope.app, scope.environment, scope.label],
     );
-    return rows[0] ? this.#document(rows[0]) : null;
+    return rows[0] ? await this.#document(rows[0]) : null;
   }
 
   async read(scope: ConfigScope): Promise<ConfigDocument | null> {
@@ -167,7 +185,7 @@ export class LucidStore implements ConfigStore {
        WHERE app = ? AND environment = ? AND label = ? AND version = ? LIMIT 1`,
       [scope.app, scope.environment, scope.label, version],
     );
-    return rows[0] ? this.#document(rows[0]) : null;
+    return rows[0] ? await this.#document(rows[0]) : null;
   }
 
   async listVersions(
@@ -188,19 +206,21 @@ export class LucidStore implements ConfigStore {
     );
     return {
       total: toNumber(total[0]?.total),
-      rows: rows.map((row) => {
-        const document = this.#document(row);
-        const counts = countsOf(document);
-        return {
-          version: document.version,
-          createdAt: document.createdAt,
-          createdBy: document.createdBy,
-          ...(document.message !== undefined ? { message: document.message } : {}),
-          entries: counts.entries,
-          secrets: counts.secrets,
-          fingerprint: document.fingerprint,
-        };
-      }),
+      rows: await Promise.all(
+        rows.map(async (row) => {
+          const document = this.#sealedDocument(row);
+          const counts = countsOf(document);
+          return {
+            version: document.version,
+            createdAt: document.createdAt,
+            createdBy: document.createdBy,
+            ...(document.message !== undefined ? { message: document.message } : {}),
+            entries: counts.entries,
+            secrets: counts.secrets,
+            fingerprint: document.fingerprint,
+          };
+        }),
+      ),
     };
   }
 
@@ -231,7 +251,7 @@ export class LucidStore implements ConfigStore {
         document.environment,
         document.label,
         document.version,
-        jsonValue(this.#sealer.sealDocument(document).entries),
+        jsonValue((await this.#sealer.sealDocument(document)).entries),
         document.fingerprint,
         document.message ?? null,
         document.createdBy,
@@ -243,7 +263,7 @@ export class LucidStore implements ConfigStore {
       environment: document.environment,
       label: document.label,
     };
-    for (const row of auditRows(
+    for (const row of await auditRows(
       scope,
       document.version,
       touched,
@@ -338,7 +358,7 @@ export class LucidStore implements ConfigStore {
               scope.environment,
               scope.label,
               document.version,
-              jsonValue(this.#sealer.sealDocument(document).entries),
+              jsonValue((await this.#sealer.sealDocument(document)).entries),
               document.fingerprint,
               document.message ?? null,
               document.createdBy,
@@ -375,7 +395,7 @@ export class LucidStore implements ConfigStore {
     throw lastError;
   }
 
-  #audit(row: AuditRow): ConfigAuditRecord {
+  async #audit(row: AuditRow): Promise<ConfigAuditRecord> {
     const before = parseJson<ConfigEntryState | null>(row.before);
     const after = parseJson<ConfigEntryState | null>(row.after);
     return this.#sealer.openAudit({
@@ -422,7 +442,86 @@ export class LucidStore implements ConfigStore {
        ORDER BY at DESC, version DESC LIMIT ? OFFSET ?`,
       [...bindings, page.size, (page.number - 1) * page.size],
     );
-    return { rows: rows.map((row) => this.#audit(row)), total: toNumber(total[0]?.total) };
+    return {
+      rows: await Promise.all(rows.map((row) => this.#audit(row))),
+      total: toNumber(total[0]?.total),
+    };
+  }
+
+  async #reseal(dryRun: boolean): Promise<ResealReport> {
+    const report: ResealReport = {
+      dryRun,
+      scanned: 0,
+      resealed: 0,
+      failed: 0,
+      statuses: emptyCryptoStatus(),
+    };
+    const codec = this.#sealer.secretCodec;
+    if (!codec) return report;
+
+    const versions = await query<{
+      id: string;
+      app: string;
+      environment: string;
+      entries: unknown;
+    }>(this.db, 'SELECT id, app, environment, entries FROM config_versions');
+    for (const row of versions) {
+      const entries = parseJson<Record<string, ConfigEntryState>>(row.entries);
+      let changed = false;
+      for (const [key, entry] of Object.entries(entries)) {
+        const next = await resealStoredEntry(
+          entry,
+          entryAad({ app: row.app, environment: row.environment }, key),
+          codec,
+          dryRun,
+          report,
+        );
+        if (next !== entry) {
+          entries[key] = next;
+          changed = true;
+        }
+      }
+      if (changed && !dryRun) {
+        await query(this.db, 'UPDATE config_versions SET entries = ? WHERE id = ?', [
+          jsonValue(entries),
+          row.id,
+        ]);
+      }
+    }
+
+    const audit = await query<{
+      id: string;
+      app: string;
+      environment: string;
+      entry_key: string | null;
+      before: unknown;
+      after: unknown;
+    }>(this.db, 'SELECT id, app, environment, entry_key, before, after FROM config_audit');
+    for (const row of audit) {
+      const aad = entryAad({ app: row.app, environment: row.environment }, row.entry_key ?? '');
+      const before = parseJson<ConfigEntryState | null>(row.before);
+      const after = parseJson<ConfigEntryState | null>(row.after);
+      const nextBefore = before
+        ? await resealStoredEntry(before, aad, codec, dryRun, report)
+        : before;
+      const nextAfter = after ? await resealStoredEntry(after, aad, codec, dryRun, report) : after;
+      if ((nextBefore !== before || nextAfter !== after) && !dryRun) {
+        await query(this.db, 'UPDATE config_audit SET before = ?, after = ? WHERE id = ?', [
+          jsonValue(nextBefore),
+          jsonValue(nextAfter),
+          row.id,
+        ]);
+      }
+    }
+    return report;
+  }
+
+  async cryptoStatus(): Promise<CryptoStatusCounts> {
+    return (await this.#reseal(true)).statuses;
+  }
+
+  async reseal(options: { dryRun?: boolean } = {}): Promise<ResealReport> {
+    return this.#reseal(options.dryRun === true);
   }
 
   async recordReveal(

@@ -2,12 +2,14 @@
  * Test helpers for apps and for this package: an in-memory control plane you can write to with the
  * same store the real one uses, plus a seeded document.
  */
+
+import { createHash } from 'node:crypto';
 import {
   type ConfigEntryInput,
   type ConfigScope,
   type ConfigValue,
 } from '@adonis-agora/config-core';
-import { secretCodec } from '../crypto/secrets.js';
+import { createConfigKeyring, keyringCodec, type SecretCodec } from '../crypto/secrets.js';
 import { MemoryStore } from '../store/memory_store.js';
 
 export { LucidStore } from '../store/lucid_store.js';
@@ -18,11 +20,18 @@ export interface MemoryConfigOptions {
   secretsKey?: string | false;
 }
 
+/** A crypto-kit codec with the default `app` key, for tests that do not care about rotation. */
+export function testSecretCodec(appKey = 'test-secret-key-for-agora-config'): SecretCodec {
+  // The kit requires a key of 16+ chars; tests pass readable short names, so derive one.
+  const secret = appKey.length >= 16 ? appKey : createHash('sha256').update(appKey).digest('hex');
+  return keyringCodec(createConfigKeyring({ appKey: secret }));
+}
+
 /** A memory store, with secrets sealed exactly like the database store seals them. */
 export function memoryConfig(options: MemoryConfigOptions = {}): MemoryStore {
   if (options.secretsKey === false) return new MemoryStore();
   return new MemoryStore({
-    secretCodec: secretCodec(options.secretsKey ?? 'test-secret-key-for-agora-config'),
+    secretCodec: testSecretCodec(options.secretsKey ?? 'test-secret-key-for-agora-config'),
   });
 }
 

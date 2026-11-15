@@ -12,6 +12,7 @@ import {
   ConfigRollback,
   ConfigVersionShow,
 } from './config.js';
+import ConfigCryptoReseal from './crypto.js';
 import ConfigPull from './pull.js';
 
 /**
@@ -31,6 +32,7 @@ const loader = new ListLoader([
   ConfigAudit,
   ConfigEnv,
   ConfigPull,
+  ConfigCryptoReseal,
   AgoraDoctor,
 ]);
 

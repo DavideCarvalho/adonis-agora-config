@@ -6,10 +6,9 @@ import { AppFactory } from '@adonisjs/core/factories/app';
 import { LoggerFactory } from '@adonisjs/core/factories/logger';
 import { Database } from '@adonisjs/lucid/database';
 import { afterEach, describe, expect, it } from 'vitest';
-import { secretCodec } from '../../src/crypto/secrets.js';
 import { query, type SqlDatabase } from '../../src/sql.js';
 import { LucidStore } from '../../src/store/lucid_store.js';
-import { testScope } from '../../src/testing/index.js';
+import { testScope, testSecretCodec } from '../../src/testing/index.js';
 
 const closers: Array<() => Promise<void>> = [];
 
@@ -48,7 +47,7 @@ const at = new Date('2026-02-02T02:02:02.000Z').toISOString();
 async function store(): Promise<LucidStore> {
   const { db } = await sqlite();
   const created = new LucidStore(db, {
-    secretCodec: secretCodec('lucid-test-key'),
+    secretCodec: testSecretCodec('lucid-test-key'),
     now: () => at,
   });
   await created.setup();
@@ -72,7 +71,7 @@ describe('LucidStore', () => {
 
   it('stores secrets as ciphertext in the column', async () => {
     const { db } = await sqlite();
-    const s = new LucidStore(db, { secretCodec: secretCodec('lucid-test-key') });
+    const s = new LucidStore(db, { secretCodec: testSecretCodec('lucid-test-key') });
     await s.setup();
     await s.write(testScope, [{ key: 'db.password', value: 'hunter2', secret: true }], {
       actor: 'ann',
@@ -83,7 +82,7 @@ describe('LucidStore', () => {
       'SELECT entries FROM config_versions ORDER BY version DESC LIMIT 1',
     );
     expect(rows[0]?.entries).not.toContain('hunter2');
-    expect(rows[0]?.entries).toContain('agora-config:v1:');
+    expect(rows[0]?.entries).toContain('agora:v1:');
     expect((await s.read(testScope))?.entries['db.password']?.value).toBe('hunter2');
   });
 
@@ -93,7 +92,7 @@ describe('LucidStore', () => {
     await s.setup();
     await expect(
       s.write(testScope, [{ key: 'p', value: 'x', secret: true }], { actor: 'ann', now: at }),
-    ).rejects.toThrow(/no encryption codec/);
+    ).rejects.toThrow(/no encryption keyring/);
   });
 
   it('rolls back and audits, filtered and paginated', async () => {

@@ -35,6 +35,9 @@ jobs:
       - name: Check agora:doctor copy
         run: pnpm --filter @adonis-agora/config check:agora-doctor
 
+      - name: Check crypto-kit copy
+        run: pnpm --filter @adonis-agora/config check:crypto-kit
+
   # Lint, typecheck and build run once on the pinned version above; only the test suite fans out
   # across every Node line the ecosystem supports (both maintained lines accepted by AdonisJS 7).
   test:

@@ -1,19 +1,18 @@
 import { type ConfigEntryState, fingerprintOf } from '@adonis-agora/config-core';
 import { describe, expect, it } from 'vitest';
-import { secretCodec } from '../../src/crypto/secrets.js';
 import { MemoryStore } from '../../src/store/memory_store.js';
 import { DocumentSealer } from '../../src/store/store.js';
-import { seedConfig, testScope } from '../../src/testing/index.js';
+import { seedConfig, testScope, testSecretCodec } from '../../src/testing/index.js';
 
 const at = new Date('2026-01-01T00:00:00.000Z').toISOString();
 
 function store(): MemoryStore {
-  return new MemoryStore({ secretCodec: secretCodec('test-key') });
+  return new MemoryStore({ secretCodec: testSecretCodec('test-key') });
 }
 
 describe('DocumentSealer', () => {
-  it('seals secret values and leaves the rest transparent', () => {
-    const sealer = new DocumentSealer(secretCodec('k'));
+  it('seals secret values and leaves the rest transparent', async () => {
+    const sealer = new DocumentSealer(testSecretCodec('k'));
     const entry: ConfigEntryState = {
       value: 'hunter2',
       secret: true,
@@ -21,24 +20,29 @@ describe('DocumentSealer', () => {
       updatedAt: at,
       updatedBy: 'tester',
     };
-    const sealed = sealer.sealEntry(entry);
+    const aad = 'shop:production:db.password';
+    const sealed = await sealer.sealEntry(entry, aad);
     expect(JSON.stringify(sealed)).not.toContain('hunter2');
-    expect(sealer.openEntry(sealed)).toEqual(entry);
+    expect(await sealer.openEntry(sealed, aad)).toEqual(entry);
     const plain: ConfigEntryState = { ...entry, secret: false };
-    expect(sealer.sealEntry(plain)).toEqual(plain);
+    expect(await sealer.sealEntry(plain, aad)).toEqual(plain);
+    await expect(sealer.openEntry(sealed, 'other:aad')).rejects.toThrow(/unreadable|did not open/);
   });
 
-  it('refuses to store a secret without a key', () => {
+  it('refuses to store a secret without a key', async () => {
     const sealer = new DocumentSealer(undefined);
-    expect(() =>
-      sealer.sealEntry({
-        value: 'x',
-        secret: true,
-        reloadable: false,
-        updatedAt: at,
-        updatedBy: 'tester',
-      }),
-    ).toThrow(/no encryption codec/);
+    await expect(
+      sealer.sealEntry(
+        {
+          value: 'x',
+          secret: true,
+          reloadable: false,
+          updatedAt: at,
+          updatedBy: 'tester',
+        },
+        'aad',
+      ),
+    ).rejects.toThrow(/no encryption keyring/);
   });
 });
 

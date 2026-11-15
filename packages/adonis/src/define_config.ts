@@ -1,6 +1,6 @@
 import type { ConfigValue, VaultReference } from '@adonis-agora/config-core';
 import type { ApplicationService } from '@adonisjs/core/types';
-import type { SecretCodec } from './crypto/secrets.js';
+import type { CryptoOptions, SecretCodec } from './crypto/secrets.js';
 import type { ConfigConsoleConfig } from './dashboard/define_config.js';
 import type { SqlDatabase } from './sql.js';
 import { LucidStore } from './store/lucid_store.js';
@@ -15,7 +15,7 @@ export interface FactoryContext {
   /** A Lucid query client (the default connection when omitted). */
   db(connection?: string): Promise<SqlDatabase>;
   autoCreateSchema: boolean;
-  /** Built from `controlPlane.secrets`; undefined when no key is configured. */
+  /** Built from `crypto`; undefined when no key is configured. */
   secretCodec?: SecretCodec;
 }
 
@@ -36,15 +36,6 @@ export const stores = {
       new MemoryStore(context.secretCodec ? { secretCodec: context.secretCodec } : {});
   },
 };
-
-/** How secret values are encrypted at rest. */
-export interface SecretsConfig {
-  /**
-   * A ready-made codec (a KMS-backed one, or a test double). Default: the app's AdonisJS encryption
-   * service (`config/encryption.ts`), with its key, key rotation and purpose binding.
-   */
-  codec?: SecretCodec;
-}
 
 /** Resolves a `vault://provider/path#field` reference at read time. */
 export type VaultResolver = (
@@ -72,7 +63,7 @@ export interface StandaloneConfig extends BaseConfig {
   app: string;
   /** Where the configuration lives. Default `stores.lucid()`. */
   store?: Factory<ConfigStore>;
-  secrets?: SecretsConfig;
+  crypto?: CryptoOptions;
   vault?: VaultConfig;
   /** Create the tables at boot. Default `true`. */
   autoCreateSchema?: boolean;
@@ -100,7 +91,7 @@ export interface ControlPlaneConfig extends BaseConfig {
   corsOrigins?: string[];
   /** Where the configuration lives. Default `stores.lucid()`. */
   store?: Factory<ConfigStore>;
-  secrets?: SecretsConfig;
+  crypto?: CryptoOptions;
   vault?: VaultConfig;
   autoCreateSchema?: boolean;
   /** Postgres: keep every table in this schema (created separately). */
@@ -155,7 +146,7 @@ export interface TenantTopologyConfig extends BaseConfig {
   };
   /** FORBIDDEN on a tenant: it owns no configuration; it reads the control plane's. */
   store?: never;
-  secrets?: never;
+  crypto?: never;
   vault?: never;
   autoCreateSchema?: never;
   schema?: never;

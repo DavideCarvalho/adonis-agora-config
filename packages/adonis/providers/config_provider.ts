@@ -2,8 +2,12 @@ import { fileURLToPath } from 'node:url';
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ApplicationService } from '@adonisjs/core/types';
 import { ConfigAdmin } from '../src/admin.js';
-import { adonisSecretCodec, type EncryptionLike } from '../src/crypto/adonis.js';
-import type { SecretCodec } from '../src/crypto/secrets.js';
+import {
+  type CryptoOptions,
+  createConfigKeyring,
+  keyringCodec,
+  type SecretCodec,
+} from '../src/crypto/secrets.js';
 import { ConfigConsole } from '../src/dashboard/console.js';
 import {
   type ConsoleAuthorizeDecision,
@@ -22,7 +26,6 @@ import {
   type ConfigConfig,
   type ControlPlaneConfig,
   type FactoryContext,
-  type SecretsConfig,
   type StandaloneConfig,
   stores,
   type TenantTopologyConfig,
@@ -185,7 +188,7 @@ export default class ConfigProvider {
     logger: { info(message: string): void; warn(message: string): void },
   ): Promise<ConfigRuntime> {
     const container = this.app.container;
-    const codec = await this.#secretCodec(config.secrets);
+    const codec = this.#secretCodec(config.crypto);
     const autoCreateSchema = config.autoCreateSchema ?? true;
     const factoryContext: FactoryContext = {
       app: this.app,
@@ -255,15 +258,18 @@ export default class ConfigProvider {
   }
 
   /**
-   * Secrets use the app's encryption service (`config/encryption.ts`): its driver, its key list and
-   * rotation, with a purpose that scopes the ciphertext to this package. A custom codec (KMS) wins.
-   * Without an encryption binding there is no codec: writing a secret fails loudly.
+   * The crypto kit keyring: `crypto.keys`/`crypto.active` when configured, else one `app` key
+   * derived from APP_KEY. Without a usable key there is no codec: writing a secret fails loudly.
    */
-  async #secretCodec(secrets: SecretsConfig | undefined): Promise<SecretCodec | undefined> {
-    if (secrets?.codec) return secrets.codec;
+  #secretCodec(crypto: CryptoOptions | undefined): SecretCodec | undefined {
     try {
-      const encryption = (await this.app.container.make('encryption')) as EncryptionLike;
-      return adonisSecretCodec(encryption);
+      return keyringCodec(
+        createConfigKeyring({
+          ...(crypto?.keys ? { keys: crypto.keys } : {}),
+          ...(crypto?.active ? { active: crypto.active } : {}),
+          appKey: process.env.APP_KEY,
+        }),
+      );
     } catch {
       return undefined;
     }

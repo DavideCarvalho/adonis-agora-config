@@ -75,6 +75,7 @@ jobs:
       - run: pnpm build
       - run: pnpm check:package
       - run: pnpm --filter @adonis-agora/config check:agora-doctor
+      - run: pnpm --filter @adonis-agora/config check:crypto-kit
 
       # A Renovate patch/minor bump automerges on its own and brings no changeset with it, so
       # the new dependency would reach npm only with the next hand-written changeset. This writes

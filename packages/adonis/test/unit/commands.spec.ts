@@ -17,11 +17,12 @@ import {
   ConfigRollback,
   ConfigVersionShow,
 } from '../../commands/config.js';
+import ConfigCryptoReseal from '../../commands/crypto.js';
 import ConfigPull from '../../commands/pull.js';
-import { secretCodec } from '../../src/crypto/secrets.js';
 import { defineConfig, stores } from '../../src/define_config.js';
 import { ControlPlane } from '../../src/http/control_plane.js';
 import { MemoryStore } from '../../src/store/memory_store.js';
+import { testSecretCodec } from '../../src/testing/index.js';
 import { sharedSecretVerifier } from '../../src/topology/verify.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
 
@@ -42,6 +43,7 @@ describe('commands', () => {
             topology: 'control-plane',
             verifyTenant: async () => null,
             store: stores.memory(),
+            crypto: { keys: [{ id: 'app', secret: 'a-test-key-of-32-characters!!!' }] },
             console: false,
           }),
         },
@@ -298,7 +300,7 @@ describe('commands', () => {
       env: { DB_HOST: 'localhost', CHECKOUT_TIMEOUT_MS: '3000' },
     });
 
-    const store = new MemoryStore({ secretCodec: secretCodec('remote-test') });
+    const store = new MemoryStore({ secretCodec: testSecretCodec('remote-test') });
     await store.write(
       { app: 'billing', environment: 'production', label: 'main' },
       [{ key: 'db.host', value: 'remote-host' }],
@@ -333,6 +335,25 @@ describe('commands', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it('reports the crypto keyring status and a dry-run reseal', async () => {
+    await seed();
+    const status = await run(ConfigCryptoReseal as never, ['--dry-run', '--json']);
+    status.instance.assertSucceeded();
+    const report = status.json();
+    expect(report).toMatchObject({
+      dryRun: true,
+      scanned: expect.any(Number),
+      resealed: 0,
+      failed: 0,
+    });
+    expect(report.statuses.active).toBeGreaterThan(0);
+    expect(status.json().statuses.retired).toBe(0);
+
+    const real = await run(ConfigCryptoReseal as never, ['--json']);
+    real.instance.assertSucceeded();
+    expect(real.json()).toMatchObject({ dryRun: false, resealed: 0, failed: 0 });
   });
 
   it('records cli:<os user> as the actor and refuses a value-less set', async () => {

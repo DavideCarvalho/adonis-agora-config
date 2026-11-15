@@ -36,11 +36,14 @@ export {
 } from './admin.js';
 export { type BootstrapOptions, type BootstrapResult, bootstrapConfig } from './bootstrap.js';
 export {
-  adonisSecretCodec,
   CONFIG_SECRET_PURPOSE,
-  type EncryptionLike,
-} from './crypto/adonis.js';
-export { deriveKey, type SecretCodec, secretCodec } from './crypto/secrets.js';
+  type CryptoOptions,
+  createConfigKeyring,
+  entryAad,
+  isKitValue,
+  keyringCodec,
+  type SecretCodec,
+} from './crypto/secrets.js';
 export { type ConsoleActor, consoleActor } from './dashboard/actor.js';
 export {
   anyAuthorize,
@@ -65,7 +68,6 @@ export {
   defineConfig,
   type Factory,
   type FactoryContext,
-  type SecretsConfig,
   type StandaloneConfig,
   stores,
   type TenantTopologyConfig,

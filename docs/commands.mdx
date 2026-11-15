@@ -19,6 +19,7 @@ node ace config:rollback --to=4 --force --message="revert the pool change"
 node ace config:audit --application=streaming --action=reveal
 node ace config:env --application=streaming
 node ace config:pull --application=streaming --write=.env.local
+node ace config:crypto:reseal --dry-run
 ```
 
 | Command | |
@@ -34,6 +35,7 @@ node ace config:pull --application=streaming --write=.env.local
 | `config:rollback --to=<version>` | writes a new version from a past one; asks unless `--force` |
 | `config:env` | the resolved values as `KEY=value`, for `eval`/pipes; `--secrets` (audited), `--prefix` |
 | `config:pull` | writes the managed `.env.local` block (or prints without `--write`); `--url`, `--token`, authkit flags, `--secrets` (audited) |
+| `config:crypto:reseal` | re-seals values with the active crypto key; `--dry-run`, `--json` |
 
 Every command takes `--application`, `--environment` and `--label` (defaults: the app in the
 runtime, the process environment, `main`) and `--json`. A failure sets exit code 1 and writes the

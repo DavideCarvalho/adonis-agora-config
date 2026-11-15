@@ -79,7 +79,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "copy:spa": "mkdir -p dist/assets && rm -rf dist/assets/spa && cp -r ../dashboard/dist/spa dist/assets/spa",
-    "check:agora-doctor": "node ../../scripts/check-agora-doctor.mjs ."
+    "check:agora-doctor": "node ../../scripts/check-agora-doctor.mjs .",
+    "check:crypto-kit": "node ../../scripts/check-crypto-kit.mjs ."
   },
   "dependencies": {
     "@adonis-agora/config-client": "workspace:^",

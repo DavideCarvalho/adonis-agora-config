@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigAdmin } from '../../src/admin.js';
-import { secretCodec } from '../../src/crypto/secrets.js';
 import { configDevTools, registerConfigDevTools } from '../../src/dev_tools.js';
 import { MemoryStore } from '../../src/store/memory_store.js';
-import { seedConfig, testScope } from '../../src/testing/index.js';
+import { seedConfig, testScope, testSecretCodec } from '../../src/testing/index.js';
 
 const call = {
   ctx: {} as never,
@@ -12,7 +11,7 @@ const call = {
 };
 
 function admin(): ConfigAdmin {
-  const store = new MemoryStore({ secretCodec: secretCodec('mcp-test') });
+  const store = new MemoryStore({ secretCodec: testSecretCodec('mcp-test') });
   return new ConfigAdmin({ store, canRevealSecrets: true });
 }
 

@@ -175,36 +175,31 @@ describe('config doctor checks', () => {
     });
   });
 
-  it('reports the app encryption service or a custom codec, and warns without either', async () => {
+  it('reports the default APP_KEY keyring, explicit crypto.keys, or warns without either', async () => {
     const root = await workspace();
     const config = {
       topology: 'control-plane',
       verifyTenant: async () => null,
     } as ConfigConfig;
-    const withEncryption = {
-      config: { get: (key: string) => (key === 'config' ? config : undefined) },
-      makePath: (path = '') => join(root, path),
-      container: { hasBinding: (binding: string) => binding === 'encryption' },
-    } as unknown as ApplicationService;
-    expect(await check('config.secrets-key').run(withEncryption)).toMatchObject({ status: 'ok' });
-
-    const without = {
-      config: { get: (key: string) => (key === 'config' ? config : undefined) },
-      makePath: (path = '') => join(root, path),
-      container: { hasBinding: () => false },
-    } as unknown as ApplicationService;
-    expect(await check('config.secrets-key').run(without)).toMatchObject({
+    delete process.env.APP_KEY;
+    expect(await check('config.crypto').run(fakeApp(config, root))).toMatchObject({
       status: 'warn',
-      fix: expect.stringContaining('config/encryption.ts'),
+      fix: expect.stringContaining('crypto.keys'),
     });
 
-    const custom = {
-      ...config,
-      secrets: { codec: { seal: () => '', open: () => null, owns: () => false } },
-    } as ConfigConfig;
-    expect(await check('config.secrets-key').run(fakeApp(custom, root))).toMatchObject({
+    process.env.APP_KEY = 'a-test-app-key-of-32-characters!';
+    expect(await check('config.crypto').run(fakeApp(config, root))).toMatchObject({
       status: 'ok',
-      message: expect.stringContaining('custom'),
+      message: expect.stringContaining('APP_KEY'),
+    });
+
+    const withKeys = {
+      ...config,
+      crypto: { keys: [{ id: '2026-11', secret: 'a-key-of-sixteen-plus' }], active: '2026-11' },
+    } as ConfigConfig;
+    expect(await check('config.crypto').run(fakeApp(withKeys, root))).toMatchObject({
+      status: 'ok',
+      message: expect.stringContaining('crypto keys'),
     });
   });
 });
