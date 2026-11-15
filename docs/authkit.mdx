@@ -73,7 +73,7 @@ too.
 
 ```ts
 import { authkitTenantToken } from '@adonis-agora/authkit-client'
-import { createConfigClient } from '@adonis-agora/config-client'
+import { createConfigClient } from '@adonis-agora/config/client'
 
 const config = createConfigClient({
   url: process.env.CONFIG_URL!,
@@ -89,7 +89,7 @@ await config.refresh()
 config.get('db.host')
 ```
 
-`@adonis-agora/config-client` has no AdonisJS dependency, so it runs in a worker, a Docker entrypoint
+The client ships in `@adonis-agora/config/client` and has no AdonisJS dependency, so it runs in a worker, a Docker entrypoint
 or the Sail CLI. It does the conditional GET, caches the document and exposes `get`/`all`/`nested`/
 `status`.
 

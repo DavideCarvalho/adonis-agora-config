@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createConfigClient } from '@adonis-agora/config-client';
 import { type ConfigValue, DEFAULT_LABEL, envNameOf, envValueOf } from '@adonis-agora/config-core';
 import { BaseCommand, flags } from '@adonisjs/core/ace';
 import type { CommandOptions } from '@adonisjs/core/types/ace';
 import { ConfigAdmin } from '../src/admin.js';
+import { createConfigClient } from '../src/client.js';
 import { ensureGitignore, hasEncryptedValues, upsertConfigBlock } from '../src/env_file.js';
 import { getRuntime, hasRuntime } from '../src/services/accessor.js';
 import type { TenantTokenSource } from '../src/topology/token.js';

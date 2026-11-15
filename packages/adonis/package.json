@@ -74,6 +74,11 @@
       "types": "./dist/src/telescope/index.d.ts",
       "import": "./dist/src/telescope/index.js",
       "default": "./dist/src/telescope/index.js"
+    },
+    "./client": {
+      "types": "./dist/src/client.d.ts",
+      "import": "./dist/src/client.js",
+      "default": "./dist/src/client.js"
     }
   },
   "files": [
@@ -93,7 +98,6 @@
     "check:crypto-kit": "node ../../scripts/check-crypto-kit.mjs ."
   },
   "dependencies": {
-    "@adonis-agora/config-client": "workspace:^",
     "@adonis-agora/config-core": "workspace:^",
     "@adonis-agora/filter": "^1.0.0-rc.5"
   },

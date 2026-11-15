@@ -199,9 +199,6 @@ importers:
 
   packages/adonis:
     dependencies:
-      '@adonis-agora/config-client':
-        specifier: workspace:^
-        version: link:../client
       '@adonis-agora/config-core':
         specifier: workspace:^
         version: link:../core

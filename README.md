@@ -9,7 +9,7 @@ Part of the Agora ecosystem.
 - `@adonis-agora/config` — the AdonisJS control plane and tenant, the console server, the CLI
   commands, the MCP dev tools and the `agora:doctor` checks.
 - `@adonis-agora/config-core` — the document format, flattening, diffing and versioning.
-- `@adonis-agora/config-client` — a remote-safe HTTP client (shared secret or authkit), used by the
+- `@adonis-agora/config` also ships the remote-safe HTTP client (`@adonis-agora/config/client`, shared secret or authkit), used by the
   CLI, Sail and any script.
 - `@adonis-agora/config-dashboard` — the console SPA, served by the control plane.
 
