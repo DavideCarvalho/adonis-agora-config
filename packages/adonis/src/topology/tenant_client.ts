@@ -188,7 +188,9 @@ export class TenantClient {
 
   constructor(private readonly options: TenantClientOptions) {
     this.#token = resolveTenantToken(options.token);
-    this.#fetch = options.transport?.fetch ?? options.fetch ?? fetch;
+    // A stored `fetch` must be bound: `this.#fetch(...)` would otherwise call it with `this` set to
+    // this client, which browsers reject with "Illegal invocation".
+    this.#fetch = (options.transport?.fetch ?? options.fetch ?? fetch).bind(globalThis);
     this.#keys = options.keys;
   }
 

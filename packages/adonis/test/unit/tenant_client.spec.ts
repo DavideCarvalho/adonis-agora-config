@@ -67,7 +67,45 @@ function client(options: Parameters<typeof createTenantClient>[0]): TenantClient
   return created;
 }
 
+/** A `fetch` that behaves like the browser's: called with any `this` but the global, it throws. */
+const strictFetch = function (
+  this: unknown,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  if (this !== globalThis) throw new TypeError('Illegal invocation');
+  return fetch(input, init);
+} as unknown as typeof fetch;
+
 describe('tenant client', () => {
+  it('calls a fetch bound to the global object, injected directly or by the transport', async () => {
+    const store = memoryConfig();
+    await seedConfig(store, testScope, [['db.host', 'localhost']]);
+    const { url } = await startServer(store);
+
+    const direct = client({
+      url,
+      partition: 'shop',
+      token: 'shop-secret',
+      fetch: strictFetch,
+      stream: false,
+      intervalMs: 60_000,
+    });
+    await direct.load();
+    expect(direct.get('db.host')).toBe('localhost');
+
+    const overTransport = client({
+      url,
+      partition: 'shop',
+      token: 'shop-secret',
+      transport: { kind: 'http', fetch: strictFetch },
+      stream: false,
+      intervalMs: 60_000,
+    });
+    await overTransport.load();
+    expect(overTransport.get('db.host')).toBe('localhost');
+  });
+
   it('loads once without starting timers (the ace commands path)', async () => {
     const store = memoryConfig();
     await seedConfig(store, testScope, [['db.host', 'localhost']]);

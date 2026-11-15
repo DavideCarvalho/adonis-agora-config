@@ -114,17 +114,23 @@ function csrfToken(): string | undefined {
 }
 
 export class ConfigApi {
+  readonly #fetcher: typeof fetch;
+
   constructor(
     readonly base: string,
-    private readonly fetcher: typeof fetch = fetch,
-  ) {}
+    fetcher: typeof fetch = fetch,
+  ) {
+    // `fetch` lives on `window` in the browser and throws "Illegal invocation" when it is called
+    // as a method of another object (which `this.#fetcher(...)` would do). Bind it once here.
+    this.#fetcher = fetcher.bind(globalThis);
+  }
 
   async #request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { accept: 'application/json' };
     if (body !== undefined) headers['content-type'] = 'application/json';
     const token = csrfToken();
     if (token !== undefined && method !== 'GET') headers['x-xsrf-token'] = token;
-    const response = await this.fetcher(`${this.base}${path}`, {
+    const response = await this.#fetcher(`${this.base}${path}`, {
       method,
       headers,
       credentials: 'same-origin',

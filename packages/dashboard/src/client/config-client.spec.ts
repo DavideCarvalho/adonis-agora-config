@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, ConfigApi, readBootstrap } from './config-client';
 
+/**
+ * A `fetch` that behaves like the browser's: it is a method of `window`, so calling it with any
+ * other `this` throws "Illegal invocation". The console used to do exactly that.
+ */
+const strictFetch = function (
+  this: unknown,
+  _input: RequestInfo | URL,
+  _init?: RequestInit,
+): Promise<Response> {
+  if (this !== globalThis) throw new TypeError('Illegal invocation');
+  return Promise.resolve(response({ data: [], meta: { total: 0 } }));
+} as unknown as typeof fetch;
+
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -62,6 +75,17 @@ describe('ConfigApi', () => {
     expect(auditUrl).toContain('filter%5Bkey%5D=p');
     await api.versions(scope, 1, 20);
     expect(String((fetcher.mock.calls[1] as unknown[])[0])).toContain('sort=-version');
+  });
+
+  it('calls the global fetch bound to the window (no Illegal invocation)', async () => {
+    vi.stubGlobal('fetch', strictFetch);
+    const api = new ConfigApi('/_config/api');
+    await expect(api.entries(scope)).resolves.toMatchObject({ data: [] });
+  });
+
+  it('calls an injected fetch bound to the window (no Illegal invocation)', async () => {
+    const api = new ConfigApi('/_config/api', strictFetch);
+    await expect(api.meta()).resolves.toBeDefined();
   });
 
   it('turns a refusal into an ApiError with the server message', async () => {

@@ -8,6 +8,10 @@ export function serve(
   routes: Array<{ method: string; pattern: string; handler: Handler }>,
 ): Promise<Server> {
   const match = (pattern: string, path: string) => {
+    // AdonisJS drops a trailing slash when it computes a route pattern, and its matcher answers
+    // `/<path>/` with the `/<path>` route. Mirror that so the harness cannot assert a route the
+    // real router would never register (or would never reach).
+    const clean = path.length > 1 && path.endsWith('/') ? path.replace(/\/$/, '') : path;
     const names: string[] = [];
     const re = new RegExp(
       `^${pattern.replace(/:([a-z]+)/g, (_, n) => {
@@ -15,7 +19,7 @@ export function serve(
         return '([^/]+)';
       })}$`,
     );
-    const m = re.exec(path);
+    const m = re.exec(clean);
     return m ? Object.fromEntries(names.map((n, i) => [n, decodeURIComponent(m[i + 1]!)])) : null;
   };
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
