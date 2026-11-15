@@ -93,7 +93,7 @@ export interface ControlPlaneConfig extends BaseConfig {
    * environment and the capabilities come from the verified token — never from the request.
    *
    * With authkit: `authkitTenantVerifier({ issuer, resource: 'urn:agora:config' })` from
-   * `@adonis-agora/authkit-client`. Without it: `verifiers.sharedSecret({ partitions: { … } })`.
+   * `@adonis-agora/authkit-client`. Without it: `sharedSecretVerifier({ partitions: { … } })`.
    */
   verifyTenant: TenantVerifierInput;
   /** Route prefix. Default `/_config`. */
@@ -120,9 +120,10 @@ export interface TenantTopologyConfig extends BaseConfig {
     /** This app's name on the control plane (the partition). */
     partition: string;
     /**
-     * The bearer token: a fixed shared secret, a function, an object with `get()`, or
-     * `authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' })`.
-     * Obtainable before the app's config loads: keep issuer/client id/secret in the environment.
+     * The bearer token: a fixed shared secret, a function, or an object with `get()`. With authkit:
+     * `authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' })` from
+     * `@adonis-agora/authkit-client` (a function with `token()`/`reset()`). Obtainable before the
+     * app's config loads: keep issuer/client id/secret in the environment.
      */
     token: TenantTokenSource;
     /** The environment to read. Default: the process's `NODE_ENV`, else `production`. */
@@ -165,22 +166,46 @@ export interface TenantTopologyConfig extends BaseConfig {
 
 export type ConfigConfig = StandaloneConfig | ControlPlaneConfig | TenantTopologyConfig;
 
-/** Identity helper that types `config/config.ts`. */
+/** Identity helper that types `config/config.ts`, and refuses shapes that cannot work. */
 export function defineConfig(config: ConfigConfig): ConfigConfig {
+  const raw = config as ConfigConfig & { verifyTenant?: unknown; controlPlane?: unknown };
   if (config.topology === 'tenant') {
     if (!config.tenant.url) throw new Error('config: tenant.url is required');
     if (!config.tenant.partition) throw new Error('config: tenant.partition is required');
-    if (!config.tenant.token) throw new Error('config: tenant.token is required');
+    if (!config.tenant.token) {
+      throw new Error(
+        "config: tenant.token is required (authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' }) or the shared secret)",
+      );
+    }
     if (!/^https?:\/\//.test(config.tenant.url)) {
       throw new Error('config: tenant.url must be an absolute http(s) URL');
     }
+    if (raw.verifyTenant !== undefined) {
+      throw new Error('config: `verifyTenant` only applies to topology "control-plane"');
+    }
   }
-  if (config.topology === 'control-plane' && !config.verifyTenant) {
-    throw new Error(
-      'config: a control plane needs `verifyTenant` — a tenant must never be trusted without a token',
-    );
+  if (config.topology === 'control-plane') {
+    if (!raw.verifyTenant) {
+      throw new Error(
+        "config: a control plane needs `verifyTenant` (authkitTenantVerifier({ issuer, resource: 'urn:agora:config' }) or sharedSecretVerifier({ partitions })) — a tenant must never be trusted without a token",
+      );
+    }
+    const kind = typeof raw.verifyTenant;
+    if (
+      kind !== 'function' &&
+      !(
+        kind === 'object' && typeof (raw.verifyTenant as { verify?: unknown }).verify === 'function'
+      )
+    ) {
+      throw new Error(
+        'config: `verifyTenant` must be a function, an object with verify() (a class instance), or a lazy import of one',
+      );
+    }
   }
-  if (config.topology !== 'tenant' && 'app' in config && !config.app) {
+  if (config.topology !== 'control-plane' && raw.verifyTenant !== undefined) {
+    throw new Error('config: `verifyTenant` only applies to topology "control-plane"');
+  }
+  if ((config.topology ?? 'standalone') === 'standalone' && !('app' in config && config.app)) {
     throw new Error('config: `app` is required on a standalone app');
   }
   return config;

@@ -8,13 +8,7 @@ export {
   type Whoami,
 } from './client.js';
 export {
-  type AuthkitTokenOptions,
-  authkitToken,
-  authkitTokenSource,
-  type ClientCredentialsOptions,
-  clientCredentials,
-  resolveTokenSource,
+  resolveTenantToken,
   type TenantToken,
   type TenantTokenSource,
-  tokens,
 } from './token.js';

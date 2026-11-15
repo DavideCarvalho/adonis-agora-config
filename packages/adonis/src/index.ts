@@ -94,23 +94,17 @@ export {
   type TenantClientOptions,
   type TenantStatus,
 } from './topology/tenant_client.js';
-export {
-  type ClientCredentialsOptions,
-  resolveTokenSource,
-  type TenantToken,
-  type TenantTokenSource,
-  tokens,
-} from './topology/token.js';
+export { resolveTenantToken, type TenantToken, type TenantTokenSource } from './topology/token.js';
 export {
   bearerToken,
-  normalizeVerifiedTenant,
+  checkVerifiedTenant,
   resolveTenantVerifier,
   type SharedSecretTenant,
   sharedSecretVerifier,
   type TenantAuthRequest,
   type TenantVerifier,
   type TenantVerifierInput,
+  type TenantVerifierModule,
   type TenantVerifierObject,
   type VerifiedTenant,
-  verifiers,
 } from './topology/verify.js';

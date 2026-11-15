@@ -8,7 +8,6 @@ import { ControlPlane } from '../../src/http/control_plane.js';
 import type { ConfigStore } from '../../src/store/store.js';
 import { memoryConfig, seedConfig, testScope } from '../../src/testing/index.js';
 import { createTenantClient, type TenantClient } from '../../src/topology/tenant_client.js';
-import { tokens } from '../../src/topology/token.js';
 import { sharedSecretVerifier, type TenantVerifier } from '../../src/topology/verify.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
 
@@ -327,11 +326,11 @@ describe('tenant client', () => {
     expect(withoutLocal.get('db.port')).toBe(5432);
   });
 
-  it('invalidates a cached token on 401', async () => {
+  it('resets a cached token on 401', async () => {
     const store = memoryConfig();
     const { url } = await startServer(store, async () => null);
-    const invalidate = vi.fn();
-    const token = { get: async () => 'stale', invalidate };
+    const reset = vi.fn();
+    const token = { get: async () => 'stale', reset };
     const tenant = client({
       url,
       partition: 'shop',
@@ -340,12 +339,28 @@ describe('tenant client', () => {
       intervalMs: 60_000,
     });
     await tenant.start();
-    expect(invalidate).toHaveBeenCalled();
+    expect(reset).toHaveBeenCalled();
+    expect(tenant.status().lastError).toMatch(/401/);
+  });
+
+  it('resets an authkit-style token function after a 401', async () => {
+    const store = memoryConfig();
+    const { url } = await startServer(store, async () => null);
+    const reset = vi.fn();
+    const token = Object.assign(async () => 'stale', { reset });
+    const tenant = client({
+      url,
+      partition: 'shop',
+      token,
+      stream: false,
+      intervalMs: 60_000,
+    });
+    await tenant.start();
+    expect(reset).toHaveBeenCalled();
     expect(tenant.status().lastError).toMatch(/401/);
   });
 
   it('reads a token source object or a function', async () => {
-    expect(await tokens.static('x').get()).toBe('x');
     const fromFn = createTenantClient({
       url: 'http://127.0.0.1:1/_config',
       partition: 'shop',
@@ -353,5 +368,12 @@ describe('tenant client', () => {
       stream: false,
     });
     expect(fromFn.status().app).toBe('shop');
+    const fromObject = createTenantClient({
+      url: 'http://127.0.0.1:1/_config',
+      partition: 'shop',
+      token: { get: async () => 'from-object' },
+      stream: false,
+    });
+    expect(fromObject.status().app).toBe('shop');
   });
 });

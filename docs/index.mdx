@@ -13,11 +13,11 @@ node ace add @adonis-agora/config
 ```
 
 ```ts title="config/config.ts (the server)"
-import { defineConfig, verifiers } from '@adonis-agora/config'
+import { defineConfig, sharedSecretVerifier } from '@adonis-agora/config'
 
 export default defineConfig({
   topology: 'control-plane',
-  verifyTenant: verifiers.sharedSecret({
+  verifyTenant: sharedSecretVerifier({
     partitions: { streaming: env.get('CONFIG_SECRET_STREAMING') },
   }),
 })

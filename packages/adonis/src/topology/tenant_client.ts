@@ -10,7 +10,7 @@ import {
   envValueOf,
   unflattenObject,
 } from '@adonis-agora/config-core';
-import { resolveTokenSource, type TenantToken, type TenantTokenSource } from './token.js';
+import { resolveTenantToken, type TenantToken, type TenantTokenSource } from './token.js';
 
 /** What changed in one update, split by whether the app may apply it without a restart. */
 export interface ConfigChangeSet {
@@ -146,7 +146,7 @@ export class TenantClient {
   #refreshing: Promise<boolean> | undefined;
 
   constructor(private readonly options: TenantClientOptions) {
-    this.#token = resolveTokenSource(options.token);
+    this.#token = resolveTenantToken(options.token);
     this.#fetch = options.fetch ?? fetch;
   }
 
@@ -329,7 +329,7 @@ export class TenantClient {
         this.#lastError = null;
         return false;
       }
-      if (response.status === 401) this.#token.invalidate?.();
+      if (response.status === 401) this.#token.reset?.();
       if (!response.ok) throw new Error(`control plane answered ${response.status}`);
       const document = (await response.json()) as ConfigDocumentView;
       this.#lastError = null;
@@ -474,7 +474,7 @@ export class TenantClient {
           },
           signal: this.#streamAbort.signal,
         });
-        if (response.status === 401) this.#token.invalidate?.();
+        if (response.status === 401) this.#token.reset?.();
         if (!response.ok || !response.body) throw new Error(`stream answered ${response.status}`);
         this.#streaming = true;
         backoff = 1_000;

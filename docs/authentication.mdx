@@ -61,7 +61,7 @@ Claims the control plane reads:
 | --- | --- |
 | `partition` | the app whose configuration the token may read |
 | `environment` (optional) | the environment; default the control plane's |
-| `scope` / `capabilities` | `config:read`, optionally `config:secrets:read` |
+| `capabilities` | `config:read`, optionally `config:secrets:read` |
 | `exp` | every stream opened with the token closes at expiry |
 
 An app's identity in the token is also what the audit trail records: the actor is the token's `act`
@@ -72,11 +72,11 @@ claim when the call is an RFC 8693 exchange, else its `sub`.
 One shared secret per app. The tenant names its app with `x-config-app`; the secret proves it.
 
 ```ts title="config/config.ts (the server)"
-import { verifiers } from '@adonis-agora/config'
+import { sharedSecretVerifier } from '@adonis-agora/config'
 
 export default defineConfig({
   topology: 'control-plane',
-  verifyTenant: verifiers.sharedSecret({
+  verifyTenant: sharedSecretVerifier({
     partitions: {
       streaming: env.get('CONFIG_SECRET_STREAMING'),
       billing: {
@@ -96,23 +96,6 @@ tenant: { url, partition: 'streaming', token: env.get('CONFIG_SECRET_STREAMING')
 The default capability set is `['config:read']`. A secret is never readable just because the app is
 authenticated.
 
-## Without authkit, with OAuth
-
-Any OIDC provider works. `tokens.clientCredentials` discovers the token endpoint instead of assuming
-`/oauth/token`, caches the token, and refreshes it before expiry:
-
-```ts
-import { tokens } from '@adonis-agora/config'
-
-token: tokens.clientCredentials({
-  issuer: env.get('OIDC_ISSUER'),
-  clientId: env.get('CONFIG_CLIENT_ID'),
-  clientSecret: env.get('CONFIG_CLIENT_SECRET'),
-  resource: 'urn:agora:config',
-  scope: ['config:read', 'config:secrets:read'],
-})
-```
-
 ## The verifier: three forms
 
 `verifyTenant` is top level and accepts the same three forms in every Agora lib:
@@ -128,8 +111,10 @@ verifyTenant: new MyVerifier()
 verifyTenant: () => import('./config_verifier.js')
 ```
 
-A lazy module may export the verifier as `default`, `verify` or `tenantVerifier`. The result is
-normalized, so a verifier written for durable (`{ tenant, scope }`) works here unchanged.
+A lazy module may export the verifier as `default`, `verify` or `tenantVerifier`. The answer is
+checked strictly: `{ partition: string, environment?: string, capabilities: string[] }` or `null`.
+A malformed answer (or the old durable `{ tenant }` shape) is refused with a clear error, never
+accepted.
 
 ## Refusals
 
@@ -138,5 +123,6 @@ normalized, so a verifier written for durable (`{ tenant, scope }`) works here u
 | no token, or the verifier rejects it | `401 { "error": "unauthorized" }` |
 | the token lacks the capability | `403 { "error": "token lacks the config:read capability" }` |
 | the token expired mid-stream | the stream closes; the tenant reconnects with a fresh token |
+| the token is rejected with 401 | the tenant calls the source's `reset()`, fetches a new token and retries once |
 
 Nothing about the refusal says whether the app exists.

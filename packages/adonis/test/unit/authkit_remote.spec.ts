@@ -1,15 +1,10 @@
 import { createServer, type Server } from 'node:http';
+import { authkitTenantToken, authkitTenantVerifier } from '@adonis-agora/authkit-client';
 import { createRemoteJWKSet, exportJWK, generateKeyPair, jwtVerify, SignJWT } from 'jose';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ControlPlane } from '../../src/http/control_plane.js';
 import type { ConfigStore } from '../../src/store/store.js';
 import { memoryConfig, seedConfig, testScope } from '../../src/testing/index.js';
-import { tokens } from '../../src/topology/token.js';
-import {
-  resolveTenantVerifier,
-  type TenantAuthRequest,
-  type TenantVerifier,
-} from '../../src/topology/verify.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
 
 interface Route {
@@ -29,31 +24,31 @@ afterEach(async () => {
   );
 });
 
-/** An in-memory OIDC issuer: discovery + JWKS, and a token endpoint for the client-credentials test. */
-async function issuer(options: { audience?: string } = {}) {
+/** An in-memory OIDC issuer: discovery + JWKS, and a token endpoint for authkitTenantToken. */
+async function issuer() {
   const { publicKey, privateKey } = await generateKeyPair('RS256');
   const jwk = { ...(await exportJWK(publicKey)), kid: 'test-key', alg: 'RS256', use: 'sig' };
   let issued = 0;
   const server = createServer((req, res) => {
-    const url = new URL(req.url!, 'http://x');
-    if (url.pathname === '/.well-known/openid-configuration') {
-      const base = addressOf(server);
+    const base = addressOf(server);
+    if (req.url === '/.well-known/openid-configuration') {
       res.writeHead(200, { 'content-type': 'application/json' }).end(
         JSON.stringify({
           issuer: base,
-          jwks_uri: `${base}/.well-known/jwks.json`,
+          authorization_endpoint: `${base}/authorize`,
           token_endpoint: `${base}/oauth/token`,
+          jwks_uri: `${base}/.well-known/jwks.json`,
         }),
       );
       return;
     }
-    if (url.pathname === '/.well-known/jwks.json') {
+    if (req.url === '/.well-known/jwks.json') {
       res
         .writeHead(200, { 'content-type': 'application/json' })
         .end(JSON.stringify({ keys: [jwk] }));
       return;
     }
-    if (url.pathname === '/oauth/token' && req.method === 'POST') {
+    if (req.url === '/oauth/token' && req.method === 'POST') {
       issued += 1;
       res.writeHead(200, { 'content-type': 'application/json' }).end(
         JSON.stringify({
@@ -72,48 +67,29 @@ async function issuer(options: { audience?: string } = {}) {
 
   const mint = (
     claims: Record<string, unknown> = {},
-    tokenOptions: { audience?: string; expired?: boolean } = {},
+    options: { audience?: string; expired?: boolean } = {},
   ) => {
     const now = Math.floor(Date.now() / 1000);
     return new SignJWT({
+      client_id: 'streaming',
       partition: 'shop',
-      scope: 'config:read',
+      capabilities: ['config:read'],
       ...claims,
     })
       .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt', kid: 'test-key' })
       .setIssuer(base)
-      .setAudience(tokenOptions.audience ?? options.audience ?? 'urn:agora:config')
-      .setSubject('service-tenant')
+      .setAudience(options.audience ?? 'urn:agora:config')
+      .setSubject('streaming')
       .setIssuedAt(now)
-      .setExpirationTime(tokenOptions.expired ? now - 60 : now + 300)
+      .setExpirationTime(options.expired ? now - 60 : now + 300)
       .sign(privateKey);
   };
 
-  return { base, mint, issued: () => issued };
-}
-
-/** The remote verifier the authkit-client helper encapsulates: JWKS + `partition`/`scope` claims. */
-function remoteVerifier(options: { issuer: string; audience: string }): TenantVerifier {
-  const jwks = createRemoteJWKSet(new URL(`${options.issuer}/.well-known/jwks.json`));
-  return async ({ token }: TenantAuthRequest) => {
-    if (!token) return null;
-    try {
-      const { payload } = await jwtVerify(token, jwks, {
-        issuer: options.issuer,
-        audience: options.audience,
-        typ: 'at+jwt',
-      });
-      if (typeof payload.partition !== 'string') return null;
-      return {
-        partition: payload.partition,
-        capabilities:
-          typeof payload.scope === 'string' ? payload.scope.split(/\s+/).filter(Boolean) : [],
-        ...(typeof payload.environment === 'string' ? { environment: payload.environment } : {}),
-        ...(typeof payload.exp === 'number' ? { expiresAt: payload.exp * 1000 } : {}),
-      };
-    } catch {
-      return null;
-    }
+  return {
+    base,
+    mint,
+    issued: () => issued,
+    jwks: createRemoteJWKSet(new URL(`${base}/.well-known/jwks.json`)),
   };
 }
 
@@ -126,7 +102,7 @@ function router(routes: Route[]) {
   };
 }
 
-async function start(store: ConfigStore, verifyTenant: TenantVerifier) {
+async function start(store: ConfigStore, verifyTenant: ReturnType<typeof authkitTenantVerifier>) {
   const controlPlane = new ControlPlane({ store, verifyTenant, environment: 'production' });
   const routes: Route[] = [];
   controlPlane.register(router(routes));
@@ -135,19 +111,20 @@ async function start(store: ConfigStore, verifyTenant: TenantVerifier) {
   return addressOf(server);
 }
 
-describe('authkit-style remote tenant auth (in-memory issuer)', () => {
+const verifierFor = (issuer: string, environment?: string) =>
+  authkitTenantVerifier({
+    issuer,
+    resource: 'urn:agora:config',
+    ...(environment ? { environment } : {}),
+  });
+
+describe('authkit service-tenant auth (real authkit-client helpers)', () => {
   it('accepts a token verified against the issuer JWKS, with the partition from the claim', async () => {
     const oidc = await issuer();
     const store = memoryConfig();
     await seedConfig(store, testScope, [['db.host', 'localhost']]);
     await seedConfig(store, { ...testScope, app: 'billing' }, [['db.host', 'billing']]);
-    // The lazy-import form of `verifyTenant`, exactly as a control plane would configure it.
-    const verifyTenant = await resolveTenantVerifier(() =>
-      Promise.resolve({
-        default: remoteVerifier({ issuer: oidc.base, audience: 'urn:agora:config' }),
-      }),
-    );
-    const base = await start(store, verifyTenant);
+    const base = await start(store, verifierFor(oidc.base));
 
     const response = await fetch(`${base}/_config/v1/config`, {
       headers: {
@@ -162,13 +139,10 @@ describe('authkit-style remote tenant auth (in-memory issuer)', () => {
     expect(body.entries['db.host'].value).toBe('localhost');
   });
 
-  it('refuses another audience and an expired token', async () => {
+  it('refuses another audience, an expired token and a token the environment does not match', async () => {
     const oidc = await issuer();
     const store = memoryConfig();
-    const base = await start(
-      store,
-      remoteVerifier({ issuer: oidc.base, audience: 'urn:agora:config' }),
-    );
+    const base = await start(store, verifierFor(oidc.base));
     const wrongAudience = await fetch(`${base}/_config/v1/config`, {
       headers: {
         authorization: `Bearer ${await oidc.mint({}, { audience: 'urn:agora:flags' })}`,
@@ -179,16 +153,24 @@ describe('authkit-style remote tenant auth (in-memory issuer)', () => {
       headers: { authorization: `Bearer ${await oidc.mint({}, { expired: true })}` },
     });
     expect(expired.status).toBe(401);
+
+    const stagingBase = await start(store, verifierFor(oidc.base, 'staging'));
+    const noEnvironment = await fetch(`${stagingBase}/_config/v1/config`, {
+      headers: { authorization: `Bearer ${await oidc.mint()}` },
+    });
+    expect(noEnvironment.status).toBe(401);
+    const staging = await fetch(`${stagingBase}/_config/v1/config`, {
+      headers: { authorization: `Bearer ${await oidc.mint({ environment: 'staging' })}` },
+    });
+    expect(staging.status).toBe(200);
+    expect((await staging.json()).environment).toBe('staging');
   });
 
-  it('gates secrets on the token scope', async () => {
+  it('gates secrets on the token capabilities', async () => {
     const oidc = await issuer();
     const store = memoryConfig();
     await seedConfig(store, testScope, [{ key: 'p', value: 'hunter2', secret: true }]);
-    const base = await start(
-      store,
-      remoteVerifier({ issuer: oidc.base, audience: 'urn:agora:config' }),
-    );
+    const base = await start(store, verifierFor(oidc.base));
 
     const reader = await (
       await fetch(`${base}/_config/v1/config`, {
@@ -200,7 +182,9 @@ describe('authkit-style remote tenant auth (in-memory issuer)', () => {
     const privileged = await (
       await fetch(`${base}/_config/v1/config`, {
         headers: {
-          authorization: `Bearer ${await oidc.mint({ scope: 'config:read config:secrets:read' })}`,
+          authorization: `Bearer ${await oidc.mint({
+            capabilities: ['config:read', 'config:secrets:read'],
+          })}`,
         },
       })
     ).json();
@@ -210,39 +194,37 @@ describe('authkit-style remote tenant auth (in-memory issuer)', () => {
   it('refuses a token with no capabilities', async () => {
     const oidc = await issuer();
     const store = memoryConfig();
-    const base = await start(
-      store,
-      remoteVerifier({ issuer: oidc.base, audience: 'urn:agora:config' }),
-    );
+    const base = await start(store, verifierFor(oidc.base));
     const response = await fetch(`${base}/_config/v1/config`, {
-      headers: { authorization: `Bearer ${await oidc.mint({ scope: '' })}` },
+      headers: { authorization: `Bearer ${await oidc.mint({ capabilities: [] })}` },
     });
     expect(response.status).toBe(403);
   });
-});
 
-describe('tokens.clientCredentials', () => {
-  it('discovers the token endpoint and caches the token', async () => {
+  it('mints a token with authkitTenantToken, caches it and resets on demand', async () => {
     const oidc = await issuer();
-    const source = tokens.clientCredentials({
+    const token = authkitTenantToken({
       issuer: oidc.base,
-      clientId: 'shop',
+      clientId: 'streaming',
       clientSecret: 'secret',
-      fetch: fetch,
+      resource: 'urn:agora:config',
     });
-    expect(await source.get()).toBe('token-1');
-    expect(await source.get()).toBe('token-1');
+    expect(await token()).toBe('token-1');
+    expect(await token.token()).toBe('token-1');
     expect(oidc.issued()).toBe(1);
-    source.invalidate?.();
-    expect(await source.get()).toBe('token-2');
+    token.reset();
+    expect(await token()).toBe('token-2');
+    expect(oidc.issued()).toBe(2);
   });
 
-  it('fails clearly when discovery or the token endpoint fails', async () => {
-    const source = tokens.clientCredentials({
-      issuer: 'http://127.0.0.1:1',
-      clientId: 'shop',
-      clientSecret: 'secret',
+  it('verifies a token minted by the issuer against the same JWKS', async () => {
+    const oidc = await issuer();
+    const token = await oidc.mint();
+    const { payload } = await jwtVerify(token, oidc.jwks, {
+      issuer: oidc.base,
+      audience: 'urn:agora:config',
+      typ: 'at+jwt',
     });
-    await expect(source.get()).rejects.toThrow(/discovery/);
+    expect(payload.partition).toBe('shop');
   });
 });

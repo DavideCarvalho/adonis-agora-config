@@ -5,7 +5,7 @@ import {
   DEFAULT_LABEL,
   unflattenObject,
 } from '@adonis-agora/config-core';
-import { resolveTokenSource, type TenantToken, type TenantTokenSource } from './token.js';
+import { resolveTenantToken, type TenantToken, type TenantTokenSource } from './token.js';
 
 export interface ConfigClientOptions {
   /** The control plane, including its prefix (`https://config.example.com/_config`). */
@@ -16,7 +16,7 @@ export interface ConfigClientOptions {
   environment?: string;
   /** Default `main`. */
   label?: string;
-  /** A shared secret, a function, `{ get() }`, or `tokens.authkit(...)`. */
+  /** A shared secret, a function (`authkitTenantToken(...)`), or an object with `get()`. */
   token: TenantTokenSource;
   fetch?: typeof fetch;
 }
@@ -71,7 +71,7 @@ export class ConfigClient {
     this.partition = options.partition;
     this.environment = options.environment ?? 'production';
     this.label = options.label ?? DEFAULT_LABEL;
-    this.#token = resolveTokenSource(options.token);
+    this.#token = resolveTenantToken(options.token);
     this.#fetch = options.fetch ?? fetch;
   }
 
@@ -98,7 +98,7 @@ export class ConfigClient {
       if (this.#document) return this.#document;
       throw new Error('config: the control plane answered 304 to an unconditional request');
     }
-    if (response.status === 401) this.#token.invalidate?.();
+    if (response.status === 401) this.#token.reset?.();
     if (!response.ok) {
       throw new Error(
         response.status === 401
@@ -127,7 +127,7 @@ export class ConfigClient {
   /** What the token is on the server (reachability + token check). Throws on a refusal. */
   async whoami(): Promise<Whoami> {
     const response = await this.#fetch(`${this.url}/v1/whoami`, { headers: await this.#headers() });
-    if (response.status === 401) this.#token.invalidate?.();
+    if (response.status === 401) this.#token.reset?.();
     if (!response.ok) throw new Error(`config: whoami answered ${response.status}`);
     return (await response.json()) as Whoami;
   }

@@ -18,7 +18,7 @@ import type { VaultResolver } from '../define_config.js';
 import type { ConfigStore } from '../store/store.js';
 import {
   bearerToken,
-  normalizeVerifiedTenant,
+  checkVerifiedTenant,
   requestHeaders,
   type TenantVerifier,
   type VerifiedTenant,
@@ -121,15 +121,28 @@ export class ControlPlane {
 
   async #authenticate(ctx: HttpContext, required: string): Promise<VerifiedTenant | null> {
     const headers = requestHeaders(ctx);
-    const verified = normalizeVerifiedTenant(
-      await this.options.verifyTenant({
-        token: bearerToken(ctx),
-        app: ctx.request.header('x-config-app') ?? undefined,
-        environment: ctx.request.header('x-config-environment') ?? undefined,
-        label: ctx.request.header('x-config-label') ?? undefined,
-        headers,
-      }),
-    );
+    const claimed = ctx.request.header('x-config-app') ?? undefined;
+    let verified: VerifiedTenant | null;
+    try {
+      verified = checkVerifiedTenant(
+        await this.options.verifyTenant({
+          token: bearerToken(ctx),
+          app: claimed,
+          partition: claimed,
+          tenant: claimed,
+          environment: ctx.request.header('x-config-environment') ?? undefined,
+          label: ctx.request.header('x-config-label') ?? undefined,
+          headers,
+        }),
+      );
+    } catch (error) {
+      // A verifier that throws (discovery down, malformed answer) never becomes an accepted tenant.
+      this.options.logger?.warn(
+        `[@adonis-agora/config] verifyTenant failed: ${(error as Error).message}`,
+      );
+      ctx.response.status(401).send({ error: 'unauthorized' });
+      return null;
+    }
     if (!verified) {
       ctx.response.status(401).send({ error: 'unauthorized' });
       return null;

@@ -3,9 +3,9 @@ import { CONFIG_SCOPES } from '@adonis-agora/config-core';
 import type { HttpContext } from '@adonisjs/core/http';
 
 /**
- * What a control plane trusts about a request: always derived from the verified token, never from
- * the request body or the URL. Same vocabulary as `@adonis-agora/durable` and
- * `@adonis-agora/flags`, so one authkit service tenant can serve every control plane.
+ * What a control plane trusts about a request: derived from the verified token, never from the
+ * request. The shape every Agora control plane uses — `authkitTenantVerifier` from
+ * `@adonis-agora/authkit-client` returns it.
  */
 export interface VerifiedTenant {
   /** The application (the partition). This is the ONLY source of the app a token may read. */
@@ -16,18 +16,21 @@ export interface VerifiedTenant {
   label?: string;
   /** `config:read`, optionally `config:secrets:read`. Never empty. */
   capabilities: string[];
+  /** The service-tenant client behind the token, when it says. */
+  clientId?: string;
   /** Epoch ms after which streams opened with this token must close. */
   expiresAt?: number;
 }
 
-/**
- * What a verifier receives. `app`/`environment`/`label` are what the caller CLAIMS (headers); they
- * are trusted only because the verifier compares them with the token. `headers` are all lowercased.
- */
+/** What a verifier receives. Only `token` is trusted, once verified. */
 export interface TenantAuthRequest {
   /** The bearer token (or the shared secret). */
   token?: string | undefined;
-  /** The claimed partition (`x-config-app`). */
+  /** The partition the caller claims (`x-config-app`). Advisory only. */
+  partition?: string | undefined;
+  /** Same as `partition` (the wire name other libs use). Advisory only. */
+  tenant?: string | undefined;
+  /** The app the caller claims; the name this package uses for `partition`. */
   app?: string | undefined;
   environment?: string | undefined;
   label?: string | undefined;
@@ -44,111 +47,111 @@ export interface TenantVerifierObject {
   verify(request: TenantAuthRequest): VerifiedTenant | null | Promise<VerifiedTenant | null>;
 }
 
-/** The three accepted forms: a function, a class instance, or a lazy `() => import(...)`. */
+/** A lazily imported verifier module: a verifier, a class, or an object with `verify`. */
+export interface TenantVerifierModule {
+  default?: TenantVerifier | TenantVerifierObject | (new () => TenantVerifierObject);
+  verify?: TenantVerifier | TenantVerifierObject;
+  tenantVerifier?: TenantVerifier | TenantVerifierObject;
+}
+
+/** The accepted forms: a function, a class instance, a class, or a lazy `() => import(...)`. */
 export type TenantVerifierInput =
   | TenantVerifier
   | TenantVerifierObject
   | (new () => TenantVerifierObject)
   | (() => Promise<TenantVerifierModule> | TenantVerifierModule);
 
-/** What a lazily imported verifier module may export. */
-export interface TenantVerifierModule {
-  default?: TenantVerifier | TenantVerifierObject | (new () => TenantVerifierObject);
-  verify?: TenantVerifier;
-  tenantVerifier?: TenantVerifier;
+function hasVerify(value: unknown): value is TenantVerifierObject {
+  return (
+    !!value &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    typeof (value as { verify?: unknown }).verify === 'function'
+  );
 }
 
-/** A verifier whose shape a verifier factory (e.g. authkit-client) may return. */
-type AnyVerifierResult = {
-  partition?: unknown;
-  tenant?: unknown;
-  environment?: unknown;
-  label?: unknown;
-  capabilities?: unknown;
-  scope?: unknown;
-  expiresAt?: unknown;
-} | null;
-
-/** Normalizes `partition`/`tenant`, `capabilities`/`scope` — durable, flags and the spec agree on meaning. */
-export function normalizeVerifiedTenant(value: AnyVerifierResult): VerifiedTenant | null {
-  if (!value || typeof value !== 'object') return null;
-  const partition = value.partition ?? value.tenant;
-  if (typeof partition !== 'string' || partition.length === 0) return null;
-  const capabilities = Array.isArray(value.capabilities)
-    ? value.capabilities.filter(
-        (capability): capability is string => typeof capability === 'string',
-      )
-    : typeof value.scope === 'string'
-      ? value.scope.split(/\s+/).filter(Boolean)
-      : [CONFIG_SCOPES.read];
-  return {
-    partition,
-    ...(typeof value.environment === 'string' && value.environment !== ''
-      ? { environment: value.environment }
-      : {}),
-    ...(typeof value.label === 'string' && value.label !== '' ? { label: value.label } : {}),
-    capabilities,
-    ...(typeof value.expiresAt === 'number' ? { expiresAt: value.expiresAt } : {}),
-  };
-}
-
-async function fromModule(
-  module: TenantVerifierModule | TenantVerifierObject | TenantVerifier,
-): Promise<TenantVerifier> {
-  if (typeof module === 'function') return resolveTenantVerifier(module as TenantVerifierInput);
-  if (
-    module &&
-    typeof module === 'object' &&
-    'verify' in module &&
-    typeof module.verify === 'function'
-  ) {
-    const instance = module as TenantVerifierObject;
-    return (request) => instance.verify(request);
-  }
-  const exported =
-    (module as TenantVerifierModule).default ?? (module as TenantVerifierModule).verify;
-  if (exported !== undefined) return resolveTenantVerifier(exported as TenantVerifierInput);
-  const named = (module as TenantVerifierModule).tenantVerifier;
-  if (named !== undefined) return resolveTenantVerifier(named);
-  throw new Error('@adonis-agora/config: the lazily imported verifier exports no verifier');
+function isVerifierClass(value: unknown): value is new () => TenantVerifierObject {
+  return (
+    typeof value === 'function' &&
+    typeof (value as { prototype?: { verify?: unknown } }).prototype?.verify === 'function'
+  );
 }
 
 /**
- * Resolves the three accepted `verifyTenant` forms: a function, a class instance (or class), or a
- * lazy `() => import('./verifier.js')`. Lazy imports keep authkit (and any other OIDC library) out of
- * the module graph of an app that does not use it.
+ * Validates a verifier's answer. `null` refuses; `{ partition, capabilities }` accepts; anything
+ * else throws, so a malformed answer is never taken for an accepted tenant. Capabilities are NOT
+ * defaulted: a verifier must say what the token may do.
  */
-export async function resolveTenantVerifier(input: TenantVerifierInput): Promise<TenantVerifier> {
-  if (typeof input === 'function') {
-    // A class: it has a prototype with `verify`.
-    const prototype = (input as { prototype?: { verify?: unknown } }).prototype;
-    if (prototype && typeof prototype.verify === 'function') {
-      const instance = new (input as new () => TenantVerifierObject)();
-      return (request) => instance.verify(request);
-    }
-    // A lazy import factory takes no arguments — but so may a verifier. Call it once and tell the
-    // two apart by what comes back: a module has `default`/`verify`/`tenantVerifier`, a verifier
-    // answers with a verified tenant or null.
-    if (input.length === 0) {
-      const produced = await (input as () => Promise<unknown>)();
-      if (
-        produced !== null &&
-        typeof produced === 'object' &&
-        ('default' in produced || 'verify' in produced || 'tenantVerifier' in produced)
-      ) {
-        return fromModule(produced as TenantVerifierModule);
-      }
-      return (request) => (input as TenantVerifier)(request);
-    }
-    return (request) => (input as TenantVerifier)(request);
+export function checkVerifiedTenant(result: unknown): VerifiedTenant | null {
+  if (result === null || result === undefined) return null;
+  const value = result as Partial<VerifiedTenant> & { tenant?: unknown; scope?: unknown };
+  if (
+    typeof value === 'object' &&
+    typeof value.partition === 'string' &&
+    value.partition.length > 0 &&
+    Array.isArray(value.capabilities) &&
+    value.capabilities.every((capability) => typeof capability === 'string') &&
+    (value.environment === undefined || typeof value.environment === 'string') &&
+    (value.label === undefined || typeof value.label === 'string') &&
+    (value.clientId === undefined || typeof value.clientId === 'string') &&
+    (value.expiresAt === undefined || typeof value.expiresAt === 'number')
+  ) {
+    return value as VerifiedTenant;
   }
-  if (input && typeof input === 'object' && typeof input.verify === 'function') {
-    const instance = input;
-    return (request) => instance.verify(request);
-  }
-  throw new Error(
-    '@adonis-agora/config: `verifyTenant` must be a function, a class instance, or `() => import(...)`',
+  throw new TypeError(
+    `[@adonis-agora/config] verifyTenant must return { partition: string, environment?: string, capabilities: string[] } or null${
+      value && typeof result === 'object' && 'tenant' in value
+        ? ' (it returned `tenant`; rename it to `partition`)'
+        : ''
+    }`,
   );
+}
+
+/**
+ * Turns any `verifyTenant` form into the function the control plane calls: a function, an object
+ * with `verify` (a class instance), a class, or a lazy import of one. Authkit's
+ * `authkitTenantVerifier()` is the function form and needs no wrapper.
+ */
+export function resolveTenantVerifier(
+  input: TenantVerifierInput,
+): (request: TenantAuthRequest) => Promise<VerifiedTenant | null> {
+  if (isVerifierClass(input)) {
+    let instance: TenantVerifierObject | undefined;
+    return async (request) => {
+      instance ??= new input();
+      return checkVerifiedTenant(await instance.verify(request));
+    };
+  }
+  if (hasVerify(input)) {
+    return async (request) => checkVerifiedTenant(await input.verify(request));
+  }
+  if (typeof input !== 'function') {
+    throw new TypeError(
+      '[@adonis-agora/config] `verifyTenant` must be a function, an object with verify() (a class instance), or a lazy import of one',
+    );
+  }
+  // A verifier function — or a lazy import factory. Call it with the request; if what comes back is
+  // a module, remember the verifier inside it. Authkit's verifier is the plain-function case.
+  const fn = input as (request: TenantAuthRequest) => unknown;
+  let lazy: Promise<(request: TenantAuthRequest) => Promise<VerifiedTenant | null>> | undefined;
+  return async (request) => {
+    if (lazy) return (await lazy)(request);
+    const result = await fn(request);
+    const exported =
+      result && typeof result === 'object' && 'default' in (result as Record<string, unknown>)
+        ? (result as TenantVerifierModule).default
+        : undefined;
+    const named =
+      exported ??
+      (result && typeof result === 'object'
+        ? ((result as TenantVerifierModule).tenantVerifier ??
+          (result as TenantVerifierModule).verify)
+        : undefined);
+    if (named !== undefined) {
+      lazy = Promise.resolve(resolveTenantVerifier(named as TenantVerifierInput));
+      return (await lazy)(request);
+    }
+    return checkVerifiedTenant(result);
+  };
 }
 
 /** Constant-time comparison that does not leak the length through an early return. */
@@ -179,7 +182,7 @@ export function sharedSecretVerifier(options: {
   partitions: Record<string, string | SharedSecretTenant>;
 }): TenantVerifier {
   return (request) => {
-    const app = request.app;
+    const app = request.app ?? request.partition ?? request.tenant;
     if (!request.token || !app) return null;
     const entry = options.partitions[app];
     if (entry === undefined) return null;
@@ -193,11 +196,6 @@ export function sharedSecretVerifier(options: {
     };
   };
 }
-
-export const verifiers = {
-  /** One secret per app (`x-config-app` names it). */
-  sharedSecret: sharedSecretVerifier,
-};
 
 /** The bearer token of a request (`authorization: Bearer`), or `x-api-key` for shared secrets. */
 export function bearerToken(ctx: HttpContext): string | undefined {

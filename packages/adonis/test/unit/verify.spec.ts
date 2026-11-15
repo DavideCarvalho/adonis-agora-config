@@ -1,26 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import {
-  normalizeVerifiedTenant,
+  checkVerifiedTenant,
   resolveTenantVerifier,
   sharedSecretVerifier,
-  verifiers,
 } from '../../src/topology/verify.js';
 
-describe('normalizeVerifiedTenant', () => {
-  it('accepts partition or tenant, capabilities or scope', () => {
-    expect(normalizeVerifiedTenant(null)).toBeNull();
-    expect(normalizeVerifiedTenant({})).toBeNull();
-    expect(normalizeVerifiedTenant({ partition: 'shop', capabilities: ['config:read'] })).toEqual({
+describe('checkVerifiedTenant', () => {
+  it('accepts the shape every Agora verifier returns', () => {
+    expect(checkVerifiedTenant(null)).toBeNull();
+    expect(checkVerifiedTenant(undefined)).toBeNull();
+    expect(
+      checkVerifiedTenant({
+        partition: 'shop',
+        capabilities: ['config:read'],
+        clientId: 'streaming',
+        expiresAt: 5,
+      }),
+    ).toEqual({
       partition: 'shop',
       capabilities: ['config:read'],
+      clientId: 'streaming',
+      expiresAt: 5,
     });
-    expect(
-      normalizeVerifiedTenant({ tenant: 'shop', scope: 'config:read config:secrets:read' }),
-    ).toEqual({ partition: 'shop', capabilities: ['config:read', 'config:secrets:read'] });
-    expect(normalizeVerifiedTenant({ tenant: 'shop' })?.capabilities).toEqual(['config:read']);
-    expect(
-      normalizeVerifiedTenant({ partition: 'shop', environment: 'staging', expiresAt: 5 }),
-    ).toMatchObject({ environment: 'staging', expiresAt: 5 });
+  });
+
+  it('throws on a malformed or legacy answer instead of accepting it', () => {
+    expect(() => checkVerifiedTenant({})).toThrow(/must return/);
+    expect(() => checkVerifiedTenant({ partition: 'shop' })).toThrow(/must return/);
+    expect(() => checkVerifiedTenant({ partition: 'shop', capabilities: 'config:read' })).toThrow(
+      /must return/,
+    );
+    expect(() => checkVerifiedTenant({ partition: 'shop', capabilities: [1] })).toThrow(
+      /must return/,
+    );
+    expect(() => checkVerifiedTenant({ tenant: 'shop', capabilities: ['config:read'] })).toThrow(
+      /rename it to `partition`/,
+    );
   });
 });
 
@@ -28,8 +43,8 @@ describe('resolveTenantVerifier', () => {
   const verifier = async ({ token }: { token?: string }) =>
     token === 'good' ? { partition: 'shop', capabilities: ['config:read'] } : null;
 
-  it('accepts a plain function', async () => {
-    const resolved = await resolveTenantVerifier(verifier);
+  it('accepts a plain function (the authkit verifier form)', async () => {
+    const resolved = resolveTenantVerifier(verifier);
     expect(await resolved({ token: 'good' })).toMatchObject({ partition: 'shop' });
     expect(await resolved({ token: 'bad' })).toBeNull();
   });
@@ -40,44 +55,44 @@ describe('resolveTenantVerifier', () => {
         return token === 'good' ? { partition: 'instance', capabilities: ['config:read'] } : null;
       }
     }
-    const instance = await resolveTenantVerifier(new Checks());
+    const instance = resolveTenantVerifier(new Checks());
     expect(await instance({ token: 'good' })).toMatchObject({ partition: 'instance' });
-    const constructed = await resolveTenantVerifier(Checks);
+    const constructed = resolveTenantVerifier(Checks);
     expect(await constructed({ token: 'good' })).toMatchObject({ partition: 'instance' });
   });
 
-  it('accepts a zero-argument verifier as well as a lazy import', async () => {
-    const zero = await resolveTenantVerifier((async () => ({
+  it('accepts a zero-argument verifier', async () => {
+    const zero = resolveTenantVerifier((async () => ({
       partition: 'zero',
       capabilities: ['config:read'],
     })) as never);
     expect(await zero({})).toMatchObject({ partition: 'zero' });
-    const closed = await resolveTenantVerifier((async () => null) as never);
+    const closed = resolveTenantVerifier((async () => null) as never);
     expect(await closed({})).toBeNull();
   });
 
   it('accepts a lazy import (default, named and tenantVerifier)', async () => {
-    const fromDefault = await resolveTenantVerifier(() =>
+    const fromDefault = resolveTenantVerifier(() =>
       Promise.resolve({ default: verifier as never }),
     );
     expect(await fromDefault({ token: 'good' })).toMatchObject({ partition: 'shop' });
 
-    const fromVerify = await resolveTenantVerifier(() =>
-      Promise.resolve({ verify: verifier as never }),
-    );
+    const fromVerify = resolveTenantVerifier(() => Promise.resolve({ verify: verifier as never }));
     expect(await fromVerify({ token: 'good' })).toMatchObject({ partition: 'shop' });
 
-    const fromNamed = await resolveTenantVerifier(() =>
+    const fromNamed = resolveTenantVerifier(() =>
       Promise.resolve({ tenantVerifier: verifier as never }),
     );
     expect(await fromNamed({ token: 'good' })).toMatchObject({ partition: 'shop' });
   });
 
-  it('refuses an unusable verifier loudly', async () => {
-    await expect(resolveTenantVerifier(undefined as never)).rejects.toThrow(/must be a function/);
-    await expect(
-      resolveTenantVerifier((() => Promise.resolve({ default: undefined })) as never),
-    ).rejects.toThrow(/exports no verifier/);
+  it('refuses an unusable verifier loudly', () => {
+    expect(() => resolveTenantVerifier(undefined as never)).toThrow(/must be a function/);
+    const broken = resolveTenantVerifier((async () => ({
+      default: undefined,
+      nothing: true,
+    })) as never);
+    return expect(broken({})).rejects.toThrow(/must return/);
   });
 });
 
@@ -99,6 +114,10 @@ describe('sharedSecretVerifier', () => {
       partition: 'shop',
       capabilities: ['config:read'],
     });
+    // The authkit request vocabulary (`partition`) works too.
+    expect(await verify({ token: 'shop-secret', partition: 'shop' })).toMatchObject({
+      partition: 'shop',
+    });
     expect(await verify({ token: 'billing-secret', app: 'billing' })).toEqual({
       partition: 'billing',
       capabilities: ['config:read', 'config:secrets:read'],
@@ -113,9 +132,5 @@ describe('sharedSecretVerifier', () => {
     expect(await verify({ token: 'shop-secret', app: 'other' })).toBeNull();
     expect(await verify({ token: 'billing-secret', app: 'shop' })).toBeNull();
     expect(await verify({ token: '', app: 'shop' })).toBeNull();
-  });
-
-  it('is available under the ecosystem name `verifiers.sharedSecret`', () => {
-    expect(verifiers.sharedSecret).toBe(sharedSecretVerifier);
   });
 });

@@ -1,25 +1,16 @@
-/**
- * Token sources for a tenant. The implementation lives in `@adonis-agora/config-client` (remote-safe,
- * usable by scripts and Sail); this module keeps the Adonis-facing names stable.
- *
- * With authkit, prefer `authkitTenantToken()` from `@adonis-agora/authkit-client` — `tokens.authkit`
- * calls it when present and falls back to the same client-credentials flow through discovery, so it
- * works before that helper ships.
- */
+import { CONFIG_SCOPES } from '@adonis-agora/config-core';
+
 export {
-  type AuthkitTokenOptions,
-  authkitToken,
-  authkitTokenSource,
-  type ClientCredentialsOptions,
-  clientCredentials,
-  resolveTokenSource,
+  resolveTenantToken,
   type TenantToken,
   type TenantTokenSource,
-  tokens,
 } from '@adonis-agora/config-client';
 
-/** The scopes the config server knows. */
+/** The resource (RFC 8707) every config control plane answers for: the `aud` of tenant tokens. */
+export { CONFIG_RESOURCE } from '@adonis-agora/config-core';
+
+/** What each control-plane endpoint requires in the token's `capabilities`. */
 export const TENANT_SCOPES = {
-  read: 'config:read',
-  secretsRead: 'config:secrets:read',
+  read: CONFIG_SCOPES.read,
+  secretsRead: CONFIG_SCOPES.secretsRead,
 } as const;

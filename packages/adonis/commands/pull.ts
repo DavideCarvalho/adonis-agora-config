@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createConfigClient, tokens } from '@adonis-agora/config-client';
+import { createConfigClient } from '@adonis-agora/config-client';
 import { type ConfigValue, DEFAULT_LABEL, envNameOf, envValueOf } from '@adonis-agora/config-core';
 import { BaseCommand, flags } from '@adonisjs/core/ace';
 import type { CommandOptions } from '@adonisjs/core/types/ace';
@@ -183,7 +183,7 @@ export default class ConfigPull extends BaseCommand {
         'no control plane URL: pass --url, set CONFIG_URL, or run inside a tenant that has one',
       );
     }
-    const token = this.#token();
+    const token = await this.#token();
     const client = createConfigClient({
       url,
       partition: scope.app,
@@ -197,26 +197,38 @@ export default class ConfigPull extends BaseCommand {
     return { values: client.values(), source: 'remote' };
   }
 
-  /** A shared secret, authkit client credentials, or the tenant's own token source. */
-  #token(): TenantTokenSource {
+  /** A shared secret, or `authkitTenantToken` from authkit-client for the issuer client. */
+  async #token(): Promise<TenantTokenSource> {
     const shared = this.token ?? process.env.CONFIG_TOKEN;
     if (shared) return shared;
     const issuer = this.issuer ?? process.env.AUTHKIT_ISSUER;
     const clientId = this.clientId ?? process.env.AUTHKIT_CLIENT_ID ?? process.env.CONFIG_CLIENT_ID;
     const clientSecret =
       this.clientSecret ?? process.env.AUTHKIT_CLIENT_SECRET ?? process.env.CONFIG_CLIENT_SECRET;
-    if (issuer && clientId && clientSecret) {
-      return tokens.authkit({
-        issuer,
-        clientId,
-        clientSecret,
-        ...(this.resource ? { resource: this.resource } : {}),
-        scope: this.secrets ? ['config:read', 'config:secrets:read'] : 'config:read',
-      });
+    if (!issuer || !clientId || !clientSecret) {
+      throw new Error(
+        'no token: pass --token/CONFIG_TOKEN, or --issuer/--client-id/--client-secret (AUTHKIT_ISSUER, AUTHKIT_CLIENT_ID, AUTHKIT_CLIENT_SECRET)',
+      );
     }
-    throw new Error(
-      'no token: pass --token/CONFIG_TOKEN, or --issuer/--client-id/--client-secret (AUTHKIT_ISSUER, AUTHKIT_CLIENT_ID, AUTHKIT_CLIENT_SECRET)',
-    );
+    let authkit: { authkitTenantToken?: (input: Record<string, unknown>) => TenantTokenSource };
+    try {
+      authkit = (await import('@adonis-agora/authkit-client')) as never;
+    } catch {
+      throw new Error(
+        'the authkit flags need @adonis-agora/authkit-client installed, or pass --token',
+      );
+    }
+    if (typeof authkit.authkitTenantToken !== 'function') {
+      throw new Error(
+        '@adonis-agora/authkit-client has no authkitTenantToken(); upgrade it or pass --token',
+      );
+    }
+    return authkit.authkitTenantToken({
+      issuer,
+      clientId,
+      clientSecret,
+      resource: this.resource ?? 'urn:agora:config',
+    });
   }
 
   /** Keeps a written env file out of git. Returns what it did. */

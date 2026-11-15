@@ -6,16 +6,18 @@ urn:agora:config`). Works in an AdonisJS app, a script, a worker, a Docker conta
 CLI — no AdonisJS dependency.
 
 ```ts
-import { createConfigClient, tokens } from '@adonis-agora/config-client'
+import { authkitTenantToken } from '@adonis-agora/authkit-client'
+import { createConfigClient } from '@adonis-agora/config-client'
 
 const client = createConfigClient({
   url: 'https://config.example.com/_config',
   partition: 'streaming',
   environment: 'production',
-  token: tokens.authkit({
+  token: authkitTenantToken({
     issuer: process.env.AUTHKIT_ISSUER!,
     clientId: process.env.AUTHKIT_CLIENT_ID!,
     clientSecret: process.env.AUTHKIT_CLIENT_SECRET!,
+    resource: 'urn:agora:config',
   }),
 })
 
@@ -25,8 +27,8 @@ client.all()
 client.status()
 ```
 
-`tokens.authkit()` uses `authkitTenantToken` from `@adonis-agora/authkit-client` when it is
-installed, and otherwise the same client-credentials flow against the issuer's discovery document
-(`/.well-known/openid-configuration`), so it works before the helper ships.
+`token` is any `string`, `() => Promise<string>` or `{ get() }`. With authkit, pass
+`authkitTenantToken(...)` from `@adonis-agora/authkit-client`; a `401` calls its `reset()` and the
+next request fetches a fresh token. This package has no OAuth or authkit logic of its own.
 
 Part of the Agora ecosystem.

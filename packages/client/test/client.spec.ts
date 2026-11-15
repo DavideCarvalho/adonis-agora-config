@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
+import { authkitTenantToken } from '@adonis-agora/authkit-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createConfigClient, fetchConfig, tokens } from '../src/index.js';
+import { createConfigClient, fetchConfig } from '../src/index.js';
 
 const servers: Server[] = [];
 
@@ -145,22 +146,26 @@ describe('ConfigClient', () => {
     });
   });
 
-  it('falls back to client credentials through discovery when authkit-client is absent', async () => {
-    const { url } = await controlPlane('issued-token');
+  it('uses authkitTenantToken and resets it after a 401', async () => {
     let issued = 0;
     const issuer = createServer((req, res) => {
       const base = addressOf(issuer);
       if (req.url === '/.well-known/openid-configuration') {
-        res
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ issuer: base, token_endpoint: `${base}/oauth/token` }));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            issuer: base,
+            authorization_endpoint: `${base}/authorize`,
+            token_endpoint: `${base}/oauth/token`,
+            jwks_uri: `${base}/jwks.json`,
+          }),
+        );
         return;
       }
       if (req.url === '/oauth/token') {
         issued += 1;
         res
           .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ access_token: 'issued-token', expires_in: 300 }));
+          .end(JSON.stringify({ access_token: `token-${issued}`, expires_in: 300 }));
         return;
       }
       res.writeHead(404).end();
@@ -168,18 +173,40 @@ describe('ConfigClient', () => {
     await new Promise<void>((resolve) => issuer.listen(0, '127.0.0.1', () => resolve()));
     servers.push(issuer);
 
-    const token = tokens.authkit({
+    // The control plane refuses the first token and accepts the next one.
+    let seen = 0;
+    const plane = createServer((_req, res) => {
+      seen += 1;
+      if (seen === 1) {
+        res.writeHead(401).end(JSON.stringify({ error: 'unauthorized' }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(document));
+    });
+    await new Promise<void>((resolve) => plane.listen(0, '127.0.0.1', () => resolve()));
+    servers.push(plane);
+
+    const token = authkitTenantToken({
       issuer: addressOf(issuer),
       clientId: 'shop',
       clientSecret: 'secret',
+      resource: 'urn:agora:config',
     });
-    expect(await token.get()).toBe('issued-token');
-    expect(await token.get()).toBe('issued-token');
+    const reset = vi.spyOn(token, 'reset');
+    const client = createConfigClient({
+      url: `${addressOf(plane)}/_config`,
+      partition: 'shop',
+      token,
+    });
+
+    expect(await client.refresh()).toBe(false);
+    expect(client.status().lastError).toContain('401');
+    expect(reset).toHaveBeenCalled();
     expect(issued).toBe(1);
 
-    const client = createConfigClient({ url, partition: 'shop', token });
     expect(await client.refresh()).toBe(true);
-    expect(client.status().lastError).toBeNull();
+    expect(issued).toBe(2);
+    expect(client.status()).toMatchObject({ version: 3, lastError: null });
   });
 
   it('refuses a missing token without a URL', () => {

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { ApplicationService } from '@adonisjs/core/types';
 import type { ConfigConfig, TenantTopologyConfig } from '../define_config.js';
 import { createTenantClient } from '../topology/tenant_client.js';
-import { resolveTokenSource } from '../topology/token.js';
+import { resolveTenantToken } from '../topology/token.js';
 import type { AgoraDoctorCheck, AgoraDoctorResult } from './agora_doctor.js';
 
 const DOCS = 'https://davidecarvalho.github.io/agora/docs/config';
@@ -19,7 +19,7 @@ function tenantEnvironment(config: TenantTopologyConfig): string {
 
 /** The headers a tenant call carries: the token, plus the claims a shared-secret verifier needs. */
 async function headers(config: TenantTopologyConfig): Promise<Record<string, string>> {
-  const token = await resolveTokenSource(config.tenant.token).get();
+  const token = await resolveTenantToken(config.tenant.token).get();
   return {
     authorization: `Bearer ${token}`,
     accept: 'application/json',

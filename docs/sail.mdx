@@ -66,6 +66,10 @@ export AUTHKIT_CLIENT_SECRET=…
 node ace config:pull --application=streaming --write=.env.local
 ```
 
+The command uses `authkitTenantToken` from `@adonis-agora/authkit-client` (lazy import) with the
+`urn:agora:config` resource; no token logic of its own. Pass `--token`/`CONFIG_TOKEN` instead when
+the app uses a shared secret.
+
 The block sits above `# sail:start`, is re-runnable, and is added to `.gitignore`. Without
 `--write`, the command prints `KEY=value` for `eval`/varlock. See [Authkit](/docs/config/authkit)
 for the client-credentials setup.
