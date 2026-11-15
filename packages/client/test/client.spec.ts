@@ -199,14 +199,62 @@ describe('ConfigClient', () => {
       token,
     });
 
-    expect(await client.refresh()).toBe(false);
-    expect(client.status().lastError).toContain('401');
-    expect(reset).toHaveBeenCalled();
-    expect(issued).toBe(1);
-
+    // The 401 resets the token; the retry with the fresh one succeeds in the same refresh.
     expect(await client.refresh()).toBe(true);
+    expect(reset).toHaveBeenCalled();
     expect(issued).toBe(2);
     expect(client.status()).toMatchObject({ version: 3, lastError: null });
+  });
+
+  it('reports a persistent 401 after resetting the token once', async () => {
+    let issued = 0;
+    const issuer = createServer((req, res) => {
+      const base = addressOf(issuer);
+      if (req.url === '/.well-known/openid-configuration') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            issuer: base,
+            authorization_endpoint: `${base}/authorize`,
+            token_endpoint: `${base}/oauth/token`,
+            jwks_uri: `${base}/jwks.json`,
+          }),
+        );
+        return;
+      }
+      if (req.url === '/oauth/token') {
+        issued += 1;
+        res
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ access_token: `token-${issued}`, expires_in: 300 }));
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    await new Promise<void>((resolve) => issuer.listen(0, '127.0.0.1', () => resolve()));
+    servers.push(issuer);
+
+    const plane = createServer((_req, res) => {
+      res.writeHead(401).end(JSON.stringify({ error: 'unauthorized' }));
+    });
+    await new Promise<void>((resolve) => plane.listen(0, '127.0.0.1', () => resolve()));
+    servers.push(plane);
+
+    const token = authkitTenantToken({
+      issuer: addressOf(issuer),
+      clientId: 'shop',
+      clientSecret: 'secret',
+      resource: 'urn:agora:config',
+    });
+    const reset = vi.spyOn(token, 'reset');
+    const client = createConfigClient({
+      url: `${addressOf(plane)}/_config`,
+      partition: 'shop',
+      token,
+    });
+    expect(await client.refresh()).toBe(false);
+    expect(reset).toHaveBeenCalled();
+    expect(client.status().lastError).toContain('401');
+    expect(issued).toBe(2);
   });
 
   it('refuses a missing token without a URL', () => {

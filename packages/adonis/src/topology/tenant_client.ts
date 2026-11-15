@@ -319,17 +319,25 @@ export class TenantClient {
 
   async #refresh(): Promise<boolean> {
     try {
-      const headers = await this.#headers();
-      headers.authorization = await this.#authorization();
-      if (this.#fingerprint)
-        headers['if-none-match'] =
-          `"${this.app}:${this.environment}:${this.label}:${this.#version}"`;
-      const response = await this.#fetch(`${this.#base}/v1/config`, { headers });
+      const request = async () => {
+        const headers = await this.#headers();
+        headers.authorization = await this.#authorization();
+        if (this.#fingerprint) {
+          headers['if-none-match'] =
+            `"${this.app}:${this.environment}:${this.label}:${this.#version}"`;
+        }
+        return this.#fetch(`${this.#base}/v1/config`, { headers });
+      };
+      let response = await request();
+      if (response.status === 401) {
+        // Drop the cached token and try once with a fresh one.
+        this.#token.reset?.();
+        response = await request();
+      }
       if (response.status === 304) {
         this.#lastError = null;
         return false;
       }
-      if (response.status === 401) this.#token.reset?.();
       if (!response.ok) throw new Error(`control plane answered ${response.status}`);
       const document = (await response.json()) as ConfigDocumentView;
       this.#lastError = null;

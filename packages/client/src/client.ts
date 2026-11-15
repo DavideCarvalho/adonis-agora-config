@@ -87,6 +87,10 @@ export class ConfigClient {
 
   /** Fetches the document; throws whatever the server (or the network) said. */
   async load(): Promise<ConfigDocumentView> {
+    return this.#load(false);
+  }
+
+  async #load(retried: boolean): Promise<ConfigDocumentView> {
     const headers = await this.#headers();
     if (this.#document) {
       headers['if-none-match'] =
@@ -98,7 +102,10 @@ export class ConfigClient {
       if (this.#document) return this.#document;
       throw new Error('config: the control plane answered 304 to an unconditional request');
     }
-    if (response.status === 401) this.#token.reset?.();
+    if (response.status === 401) {
+      this.#token.reset?.();
+      if (!retried) return this.#load(true);
+    }
     if (!response.ok) {
       throw new Error(
         response.status === 401

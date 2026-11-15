@@ -343,6 +343,30 @@ describe('tenant client', () => {
     expect(tenant.status().lastError).toMatch(/401/);
   });
 
+  it('retries once with a fresh token after a 401 and boots from the server', async () => {
+    const store = memoryConfig();
+    await seedConfig(store, testScope, [['db.host', 'localhost']]);
+    let current = 'bad';
+    const reset = vi.fn(() => {
+      current = 'good';
+    });
+    const token = Object.assign(async () => current, { reset });
+    const { url } = await startServer(store, async ({ token: presented }) =>
+      presented === 'good' ? { partition: 'shop', capabilities: ['config:read'] } : null,
+    );
+    const tenant = client({
+      url,
+      partition: 'shop',
+      token,
+      stream: false,
+      intervalMs: 60_000,
+    });
+    await tenant.start();
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(tenant.status()).toMatchObject({ source: 'remote', lastError: null });
+    expect(tenant.get('db.host')).toBe('localhost');
+  });
+
   it('resets an authkit-style token function after a 401', async () => {
     const store = memoryConfig();
     const { url } = await startServer(store, async () => null);
