@@ -54,6 +54,15 @@ describe('config secret codec (crypto kit)', () => {
     expect(await after.open(fresh, { aad })).toBe('hunter2');
   });
 
+  it('accepts a plain key list (the first seals)', async () => {
+    const secrets = keyringCodec(
+      createConfigKeyring({ keys: [appKey, 'an-old-app-key-of-32-chars!!!'] }),
+    );
+    const sealed = await secrets.seal('v', { aad });
+    expect(await secrets.open(sealed, { aad })).toBe('v');
+    expect(await secrets.status(sealed, { aad })).toBe('active');
+  });
+
   it('refuses a plain string instead of serving it as a secret', async () => {
     const secrets = codec();
     expect(secrets.owns('plain')).toBe(true);

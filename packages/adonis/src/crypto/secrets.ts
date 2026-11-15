@@ -15,11 +15,8 @@ import {
 /** Domain separation for every config secret: one APP_KEY never yields the same key twice. */
 export const CONFIG_SECRET_PURPOSE = 'config:secrets';
 
-/** One key. The kit takes plain secrets; the id is how config names the active one. */
-export interface CryptoKey {
-  id: string;
-  secret: SecretLike;
-}
+/** One key: a secret, or `{ id, secret }` when you want to name the active one. */
+export type CryptoKey = SecretLike | { id: string; secret: SecretLike };
 
 /** Rotation options. The first key seals; `active` names the one that seals, if not the first. */
 export interface CryptoOptions {
@@ -60,9 +57,15 @@ export function createConfigKeyring(options: {
   kms?: KmsAdapter | undefined;
   appKey?: SecretLike | undefined;
 }): Keyring {
-  const configured =
+  const configured: Array<{ id: string; secret: SecretLike }> =
     options.keys?.length && options.keys.length > 0
-      ? options.keys
+      ? options.keys.map((key, index) => {
+          const named =
+            typeof key === 'object' && key !== null && 'secret' in key
+              ? (key as { id: string; secret: SecretLike })
+              : { id: `key-${index}`, secret: key as SecretLike };
+          return named;
+        })
       : [{ id: 'app', secret: options.appKey ?? '' }];
   const activeId = options.active ?? configured[0]?.id;
   const active = configured.find((key) => key.id === activeId);
