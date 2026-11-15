@@ -1,5 +1,11 @@
 # @adonis-agora/config-dashboard
 
+## 0.1.1
+
+### Patch Changes
+
+- [#7](https://github.com/DavideCarvalho/adonis-agora-config/pull/7) [`ca3b7c9`](https://github.com/DavideCarvalho/adonis-agora-config/commit/ca3b7c94231c9f3df8ded7b8e911149e442e83c8) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - ⌘K now navigates: it lists every page of the console's sidebar and every other Agora console you can open ("Go to Workflows", found by "durable" too), matched case- and accent-insensitively, before the console's own commands and the cross-console search hits. ⌘K opens even without a search endpoint, and shows the pages and consoles before anything is typed.
+
 ## 0.1.0
 
 ### Minor Changes
