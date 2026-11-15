@@ -30,7 +30,10 @@ export function adminOf(app: {
     );
   }
   void app;
-  return new ConfigAdmin({ store: runtime.store });
+  return new ConfigAdmin({
+    store: runtime.store,
+    onChange: (scope, version) => runtime.controlPlane?.bus.publish(scope, version),
+  });
 }
 
 /** Shared flags and helpers for the `config:*` commands. */

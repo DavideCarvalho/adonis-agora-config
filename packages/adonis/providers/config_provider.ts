@@ -203,13 +203,6 @@ export default class ConfigProvider {
 
     const app = config.topology === 'standalone' ? config.app : '';
     const consoleConfig = resolveConsoleConfig(config.console, { environment });
-    const admin = new ConfigAdmin({
-      store,
-      canRevealSecrets: consoleConfig.revealSecrets,
-      ...(config.vault ? { vault: config.vault.resolve } : {}),
-    });
-    this.#admin = admin;
-    this.#consoleConfig = consoleConfig;
 
     let controlPlane: ControlPlane | undefined;
     if (config.topology === 'control-plane') {
@@ -224,6 +217,18 @@ export default class ConfigProvider {
         logger,
       });
     }
+    const admin = new ConfigAdmin({
+      store,
+      canRevealSecrets: consoleConfig.revealSecrets,
+      ...(config.vault ? { vault: config.vault.resolve } : {}),
+      // Every write (console, MCP, command) reaches the streams of this process immediately; another
+      // replica catches up on the stream's own 15s version poll.
+      ...(controlPlane
+        ? { onChange: (scope, version) => controlPlane!.bus.publish(scope, version) }
+        : {}),
+    });
+    this.#admin = admin;
+    this.#consoleConfig = consoleConfig;
     logger.info(
       `[@adonis-agora/config] ${config.topology ?? 'standalone'} on ${environment}${controlPlane ? ` at ${config.topology === 'control-plane' ? (config.prefix ?? '/_config') : ''}/v1` : ''}`,
     );

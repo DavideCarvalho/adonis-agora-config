@@ -134,6 +134,24 @@ describe('ConfigAdmin', () => {
     }
   });
 
+  it('notifies the control plane bus after a write, and only then', async () => {
+    const store = new MemoryStore({ secretCodec: secretCodec('bus-test') });
+    const published: Array<{ app: string; version: number }> = [];
+    const a = new ConfigAdmin({
+      store,
+      onChange: (scope, version) => published.push({ app: scope.app, version }),
+    });
+    await a.setEntry(testScope, 'a', { value: 1 }, { actor: 'ann', now: at });
+    expect(published).toEqual([{ app: 'shop', version: 1 }]);
+    // No-op write: no version, no event.
+    await a.setEntry(testScope, 'a', { value: 1 }, { actor: 'ann', now: at });
+    expect(published).toHaveLength(1);
+    await a.setEntry(testScope, 'b', { value: 2 }, { actor: 'ann', now: at });
+    await a.unsetEntry(testScope, 'b', { actor: 'ann', now: at });
+    await a.rollback(testScope, 2, { actor: 'ann', now: at });
+    expect(published.map((entry) => entry.version)).toEqual([1, 2, 3, 4]);
+  });
+
   it('exposes scopes, keys and values', async () => {
     const { store, admin: a } = admin();
     await seedConfig(store, testScope, [

@@ -56,6 +56,11 @@ export interface ConfigAdminOptions {
   canRevealSecrets?: boolean;
   /** Resolves `vault://` references when an operator reads one (never for a masked read). */
   vault?: VaultResolver;
+  /**
+   * Called after a write produced a new version. The control plane publishes it on its SSE bus, so
+   * tenants connected to this process refresh immediately instead of at the next poll.
+   */
+  onChange?: (scope: ConfigScope, version: number) => void;
 }
 
 function compare(a: unknown, b: unknown): number {
@@ -73,11 +78,13 @@ export class ConfigAdmin {
   readonly store: ConfigStore;
   readonly canRevealSecrets: boolean;
   readonly #vault: VaultResolver | undefined;
+  readonly #onChange: ((scope: ConfigScope, version: number) => void) | undefined;
 
   constructor(options: ConfigAdminOptions) {
     this.store = options.store;
     this.canRevealSecrets = options.canRevealSecrets ?? true;
     this.#vault = options.vault;
+    this.#onChange = options.onChange;
   }
 
   /** Apps, environments and labels that hold something, for the console's pickers. */
@@ -196,6 +203,7 @@ export class ConfigAdmin {
       now: options.now ?? new Date().toISOString(),
       ...(options.message !== undefined ? { message: options.message } : {}),
     });
+    if (result.changed) this.#onChange?.(scope, result.document.version);
     return { version: result.document.version, changed: result.changed };
   }
 
@@ -211,6 +219,7 @@ export class ConfigAdmin {
       now: options.now ?? new Date().toISOString(),
       ...(options.message !== undefined ? { message: options.message } : {}),
     });
+    if (result.changed) this.#onChange?.(scope, result.document.version);
     return { version: result.document.version, changed: result.changed };
   }
 
@@ -293,6 +302,7 @@ export class ConfigAdmin {
       now: options.now ?? new Date().toISOString(),
       message: options.message ?? `Rollback to version ${to}`,
     });
+    if (result.changed) this.#onChange?.(scope, result.document.version);
     return { version: result.document.version, changed: result.changed };
   }
 

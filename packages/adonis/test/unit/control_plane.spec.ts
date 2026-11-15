@@ -1,5 +1,6 @@
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ConfigAdmin } from '../../src/admin.js';
 import {
   ControlPlane,
   type ControlPlaneOptions,
@@ -202,11 +203,12 @@ describe('control plane', () => {
     const first = await reader.read();
     expect(first.value).toContain('event: config');
 
-    await store.write(testScope, [{ key: 'a', value: 2 }], {
-      actor: 'tester',
-      now: new Date().toISOString(),
+    // A write through the same admin the console/CLI/MCP use publishes on the bus.
+    const admin = new ConfigAdmin({
+      store,
+      onChange: (scope, version) => controlPlane.bus.publish(scope, version),
     });
-    controlPlane.bus.publish(testScope, 2);
+    await admin.setEntry(testScope, 'a', { value: 2 }, { actor: 'tester' });
     const second = await reader.read();
     expect(second.value).toContain('"version":2');
     controller.abort();
