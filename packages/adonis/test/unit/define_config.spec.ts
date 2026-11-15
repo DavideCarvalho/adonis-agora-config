@@ -1,6 +1,6 @@
 import { authkitTenantVerifier } from '@adonis-agora/authkit-client';
 import { describe, expect, it } from 'vitest';
-import { defineConfig, stores } from '../../src/define_config.js';
+import { defineConfig, resolveStandaloneApp, stores } from '../../src/define_config.js';
 import { sharedSecretVerifier } from '../../src/topology/verify.js';
 
 describe('defineConfig', () => {
@@ -79,9 +79,12 @@ describe('defineConfig', () => {
     expect(() =>
       defineConfig({ topology: 'standalone', app: 'shop', store: stores.memory() }),
     ).not.toThrow();
-    // `app` is optional: the provider falls back to the package.json name (like the other libs).
+    // `app` is optional: the provider falls back to APP_NAME when set.
     expect(defineConfig({ topology: 'standalone' } as never)).toMatchObject({
       topology: 'standalone',
     });
+    expect(resolveStandaloneApp(undefined, 'Entre Textos')).toBe('Entre Textos');
+    expect(resolveStandaloneApp('shop', 'Entre Textos')).toBe('shop');
+    expect(resolveStandaloneApp(undefined, undefined)).toBeUndefined();
   });
 });

@@ -66,8 +66,9 @@ interface BaseConfig {
 export interface StandaloneConfig extends BaseConfig {
   topology?: 'standalone';
   /**
-   * This app's name (the partition). Optional on a standalone: when omitted the runtime has no
-   * default app and the console/CLI ask for one (`--application`).
+   * This app's name (the partition). Default on a standalone: `APP_NAME` when set; otherwise the
+   * runtime has no default app and the console/CLI ask for one (`--application`). A tenant always
+   * takes its `tenant.partition`.
    */
   app?: string;
   /** Where the configuration lives. Default `stores.lucid()`. */
@@ -171,6 +172,14 @@ export interface TenantTopologyConfig extends BaseConfig {
 }
 
 export type ConfigConfig = StandaloneConfig | ControlPlaneConfig | TenantTopologyConfig;
+
+/** The standalone partition: the explicit `app`, else `APP_NAME`, else none. */
+export function resolveStandaloneApp(
+  explicit: string | undefined,
+  appName: string | undefined = process.env.APP_NAME,
+): string | undefined {
+  return explicit?.trim() || appName?.trim() || undefined;
+}
 
 /** Identity helper that types `config/config.ts`, and refuses shapes that cannot work. */
 export function defineConfig(config: ConfigConfig): ConfigConfig {

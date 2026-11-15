@@ -27,6 +27,7 @@ import {
   type ConfigConfig,
   type ControlPlaneConfig,
   type FactoryContext,
+  resolveStandaloneApp,
   type StandaloneConfig,
   stores,
   type TenantTopologyConfig,
@@ -277,7 +278,10 @@ export default class ConfigProvider {
     const store: ConfigStore = await (config.store ?? stores.lucid())(factoryContext);
     await store.setup?.();
 
-    const app = config.topology === 'standalone' ? (config.app ?? '') : '';
+    const app =
+      config.topology === 'standalone'
+        ? (resolveStandaloneApp(config.app, process.env.APP_NAME) ?? '')
+        : '';
     const consoleConfig = resolveConsoleConfig(config.console, { environment });
 
     let controlPlane: ControlPlane | undefined;
