@@ -1,11 +1,4 @@
 export {
-  ConfigClient,
-  type ConfigClientOptions,
-  type ConfigClientStatus,
-  createConfigClient,
-  fetchConfig,
-} from '@adonis-agora/config-client';
-export {
   CONFIG_RESOURCE,
   CONFIG_SCOPES,
   type ConfigAuditRecord,
@@ -36,6 +29,14 @@ export {
   type SetEntryOptions,
 } from './admin.js';
 export { type BootstrapOptions, type BootstrapResult, bootstrapConfig } from './bootstrap.js';
+export {
+  ConfigClient,
+  type ConfigClientOptions,
+  type ConfigClientStatus,
+  createConfigClient,
+  fetchConfig,
+  type Whoami,
+} from './client.js';
 export {
   CONFIG_SECRET_PURPOSE,
   type CryptoKey,

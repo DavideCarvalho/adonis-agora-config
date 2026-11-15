@@ -20,7 +20,7 @@ export default defineConfig({
 
 It also ships the console (`/_config`), the `config:entry:*`, `config:history`, `config:rollback`,
 `config:env` and `config:pull` commands, the MCP dev tools and the `agora:doctor` checks, plus a
-remote-safe client (`@adonis-agora/config-client`) for scripts and Sail.
+remote-safe client (`@adonis-agora/config/client`) for scripts and Sail.
 
 Read the docs at [`docs/`](./docs): the control plane, the tenant, authentication, secrets, the
 console, the CLI, MCP tools, deployment topologies and Sail.
