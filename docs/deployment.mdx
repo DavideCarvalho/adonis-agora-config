@@ -77,8 +77,10 @@ Step 2 is optional; without it steps 3 and 4 swap, and `config/*.ts` keep their 
 ## PgBouncer and schemas
 
 Every query names its schema (`schema: 'agora'`), so nothing depends on `search_path` and the lib is
-safe behind PgBouncer in transaction mode. The boot-time `CREATE TABLE IF NOT EXISTS` is idempotent;
-turn it off (`autoCreateSchema: false`) when migrations own the tables.
+safe behind PgBouncer in transaction mode. The schema and its three tables (`config_versions`,
+`config_audit`, `config_tenant_keys`) are created on boot; the DDL is idempotent. Turn it off
+(`autoCreateSchema: false`) when migrations own the tables, passing the same `schema` to
+`createConfigTables`.
 
 ## Rolling out a change
 

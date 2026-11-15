@@ -23,7 +23,7 @@ export function dialectOf(client: SqlClient): Dialect {
 }
 
 /** Every table this package owns. */
-export const CONFIG_TABLES = ['config_versions', 'config_audit'] as const;
+export const CONFIG_TABLES = ['config_versions', 'config_audit', 'config_tenant_keys'] as const;
 
 const SCHEMA_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 const TABLE_REF = new RegExp(`(?<![\\w.'"\`])(${CONFIG_TABLES.join('|')})(?![\\w'"\`])`, 'g');

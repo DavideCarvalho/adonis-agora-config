@@ -1,57 +1,31 @@
+{{{
+  exports({ to: app.migrationsPath(`${new Date().getTime()}_create_config_tables.ts`) })
+}}}
 import { BaseSchema } from '@adonisjs/lucid/schema'
+import { createConfigTables, dropConfigTables } from '@adonis-agora/config'
 
 /**
- * The tables @adonis-agora/config owns. The provider creates them at boot by default
- * (`autoCreateSchema: true`); this migration is for teams that manage every table themselves.
+ * The config tables, for apps that run DDL explicitly.
+ *
+ * **You may not need this file.** `@adonis-agora/config` creates its tables at boot
+ * (`autoCreateSchema`, on by default), like the other Agora libraries. Keep this migration if you
+ * want migrations to own the schema, and set `autoCreateSchema: false` in config/config.ts. Both
+ * paths call the same `createConfigTables`.
+ *
+ * With `schema: 'agora'` in config/config.ts, pass the same one here:
+ *   createConfigTables(db as never, { schema: 'agora' })
+ * (the schema is created first; the tables are named `agora.config_versions`, …).
  */
 export default class extends BaseSchema {
   async up() {
-    this.schema.createTable('config_versions', (table) => {
-      table.string('id', 36).notNullable().primary()
-      table.string('app', 128).notNullable()
-      table.string('environment', 128).notNullable()
-      table.string('label', 128).notNullable()
-      table.integer('version').notNullable()
-      table.text('entries').notNullable()
-      table.string('fingerprint', 32).notNullable()
-      table.text('message').nullable()
-      table.string('created_by', 255).notNullable()
-      table.string('created_at', 32).notNullable()
-      table.unique(['app', 'environment', 'label', 'version'])
-    })
-
-    this.schema.createTable('config_audit', (table) => {
-      table.string('id', 36).notNullable().primary()
-      table.string('app', 128).notNullable()
-      table.string('environment', 128).notNullable()
-      table.string('label', 128).notNullable()
-      table.string('actor', 255).notNullable()
-      table.string('action', 16).notNullable()
-      table.string('entry_key', 255).nullable()
-      table.integer('version').notNullable()
-      table.text('message').nullable()
-      table.text('before').nullable()
-      table.text('after').nullable()
-      table.string('at', 32).notNullable()
-      table.index(['app', 'environment', 'label', 'at'])
-    })
-
-    // The public X25519 keys tenant apps registered, for secrets sealed to them.
-    this.schema.createTable('config_tenant_keys', (table) => {
-      table.string('id', 36).notNullable().primary()
-      table.string('app', 128).notNullable()
-      table.string('kid', 128).notNullable()
-      table.text('public_key').notNullable()
-      table.integer('active').notNullable().defaultTo(0)
-      table.string('created_by', 255).notNullable()
-      table.string('created_at', 32).notNullable()
-      table.unique(['app', 'kid'])
+    this.defer(async (db) => {
+      await createConfigTables(db as never /* , { schema: 'agora' } */)
     })
   }
 
   async down() {
-    this.schema.dropTable('config_tenant_keys')
-    this.schema.dropTable('config_audit')
-    this.schema.dropTable('config_versions')
+    this.defer(async (db) => {
+      await dropConfigTables(db as never /* , { schema: 'agora' } */)
+    })
   }
 }

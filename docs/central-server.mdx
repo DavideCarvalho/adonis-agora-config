@@ -50,8 +50,13 @@ For a schema other than the connection's default:
 defineConfig({ topology: 'control-plane', verifyTenant, schema: 'agora' })
 ```
 
-`autoCreateSchema: false` turns the boot-time `CREATE TABLE IF NOT EXISTS` off when migrations own
-the tables (a migration stub ships in `stubs/database`).
+The schema is created on boot (`CREATE SCHEMA IF NOT EXISTS` on Postgres, `CREATE DATABASE IF NOT
+EXISTS` on MySQL) and all three tables — `config_versions`, `config_audit` and `config_tenant_keys` —
+are created there as `agora.config_versions`, …; every query names the schema, so nothing depends on
+`search_path` (safe behind PgBouncer). On SQLite there are no schemas: leave it unset.
+
+`autoCreateSchema: false` turns the boot-time DDL off when migrations own the tables (the migration
+stub in `stubs/database` takes the same `{ schema: 'agora' }`).
 
 ## Versions, history and rollback
 

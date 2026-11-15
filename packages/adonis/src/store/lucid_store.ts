@@ -10,6 +10,7 @@ import { entryAad, type SecretCodec } from '../crypto/secrets.js';
 import {
   type Dialect,
   dialectOf,
+  inSchema,
   jsonValue,
   parseJson,
   query,
@@ -17,6 +18,7 @@ import {
   type SqlDatabase,
   toNumber,
 } from '../sql.js';
+import { createConfigTables } from './schema.js';
 import {
   applyChanges,
   auditRows,
@@ -36,8 +38,10 @@ import {
 } from './store.js';
 
 export interface LucidStoreOptions {
-  /** Create the two tables at boot. Default `true` (the Agora convention). */
+  /** Create the tables at boot. Default `true` (the Agora convention). */
   autoCreateSchema?: boolean;
+  /** Postgres schema / MySQL database for this package's tables. */
+  schema?: string;
   secretCodec?: SecretCodec;
   /** Clock, so tests can pin timestamps. */
   now?: () => string;
@@ -85,15 +89,19 @@ function isUniqueViolation(error: unknown): boolean {
  * once still produce two ordered versions.
  */
 export class LucidStore implements ConfigStore {
+  readonly db: SqlDatabase;
   readonly dialect: Dialect;
   readonly #sealer: DocumentSealer;
   readonly #now: () => string;
 
   constructor(
-    readonly db: SqlDatabase,
+    db: SqlDatabase,
     private readonly options: LucidStoreOptions = {},
   ) {
-    this.dialect = dialectOf(db);
+    // Bind the client to the schema here as well, so a store constructed directly (a test, a
+    // custom factory) names `schema.table` in every query, not only in `setup()`.
+    this.db = inSchema(db, options.schema);
+    this.dialect = dialectOf(this.db);
     this.#sealer = new DocumentSealer(options.secretCodec);
     this.#now = options.now ?? (() => new Date().toISOString());
   }
@@ -101,52 +109,7 @@ export class LucidStore implements ConfigStore {
   /** Creates this package's tables (idempotent), unless `autoCreateSchema: false`. */
   async setup(): Promise<void> {
     if (this.options.autoCreateSchema === false) return;
-    await query(
-      this.db,
-      `CREATE TABLE IF NOT EXISTS config_versions (
-      id varchar(36) NOT NULL PRIMARY KEY,
-      app varchar(128) NOT NULL,
-      environment varchar(128) NOT NULL,
-      label varchar(128) NOT NULL,
-      version integer NOT NULL,
-      entries text NOT NULL,
-      fingerprint varchar(32) NOT NULL,
-      message text NULL,
-      created_by varchar(255) NOT NULL,
-      created_at varchar(32) NOT NULL,
-      CONSTRAINT config_versions_scope_version UNIQUE (app, environment, label, version)
-    )`,
-    );
-    await query(
-      this.db,
-      `CREATE TABLE IF NOT EXISTS config_audit (
-      id varchar(36) NOT NULL PRIMARY KEY,
-      app varchar(128) NOT NULL,
-      environment varchar(128) NOT NULL,
-      label varchar(128) NOT NULL,
-      actor varchar(255) NOT NULL,
-      action varchar(16) NOT NULL,
-      entry_key varchar(255) NULL,
-      version integer NOT NULL,
-      message text NULL,
-      before text NULL,
-      after text NULL,
-      at varchar(32) NOT NULL
-    )`,
-    );
-    await query(
-      this.db,
-      `CREATE TABLE IF NOT EXISTS config_tenant_keys (
-      id varchar(36) NOT NULL PRIMARY KEY,
-      app varchar(128) NOT NULL,
-      kid varchar(128) NOT NULL,
-      public_key text NOT NULL,
-      active integer NOT NULL,
-      created_by varchar(255) NOT NULL,
-      created_at varchar(32) NOT NULL,
-      CONSTRAINT config_tenant_keys_app_kid UNIQUE (app, kid)
-    )`,
-    );
+    await createConfigTables(this.db);
   }
 
   #sealedDocument(row: VersionRow): ConfigDocument {

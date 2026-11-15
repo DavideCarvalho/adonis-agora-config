@@ -98,6 +98,11 @@ export {
 } from './http/control_plane.js';
 export { LucidStore, type LucidStoreOptions } from './store/lucid_store.js';
 export { MemoryStore } from './store/memory_store.js';
+export {
+  type ConfigSchemaOptions,
+  createConfigTables,
+  dropConfigTables,
+} from './store/schema.js';
 export type {
   ConfigStore,
   StorePage,
