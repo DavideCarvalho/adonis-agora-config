@@ -12,6 +12,7 @@ import {
   ConfigRollback,
   ConfigVersionShow,
 } from './config.js';
+import ConfigPull from './pull.js';
 
 /**
  * The commands of `@adonis-agora/config`, registered by `configure` with
@@ -29,6 +30,7 @@ const loader = new ListLoader([
   ConfigRollback,
   ConfigAudit,
   ConfigEnv,
+  ConfigPull,
   AgoraDoctor,
 ]);
 

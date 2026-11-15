@@ -82,6 +82,7 @@
     "check:agora-doctor": "node ../../scripts/check-agora-doctor.mjs ."
   },
   "dependencies": {
+    "@adonis-agora/config-client": "workspace:^",
     "@adonis-agora/config-core": "workspace:^",
     "@adonis-agora/filter": "^1.0.0-rc.5"
   },

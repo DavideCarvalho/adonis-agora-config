@@ -1,0 +1,64 @@
+{
+  "name": "@adonis-agora/config-client",
+  "version": "0.0.0",
+  "description": "Remote-safe client for an @adonis-agora/config server — fetch a scope with a shared secret or authkit client credentials, from any runtime. Part of the Agora ecosystem.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavideCarvalho/adonis-agora-config.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://davidecarvalho.github.io/agora/docs/config",
+  "bugs": {
+    "url": "https://github.com/DavideCarvalho/adonis-agora-config/issues"
+  },
+  "keywords": [
+    "adonisjs",
+    "adonis",
+    "config",
+    "config-client",
+    "agora"
+  ],
+  "author": "Davi Carvalho <davi@goflip.ai>",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm run build",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@adonis-agora/config-core": "workspace:^"
+  },
+  "peerDependencies": {
+    "@adonis-agora/authkit-client": ">=0.18.0 <2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@adonis-agora/authkit-client": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

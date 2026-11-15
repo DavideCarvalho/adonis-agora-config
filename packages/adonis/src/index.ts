@@ -1,4 +1,11 @@
 export {
+  ConfigClient,
+  type ConfigClientOptions,
+  type ConfigClientStatus,
+  createConfigClient,
+  fetchConfig,
+} from '@adonis-agora/config-client';
+export {
   CONFIG_RESOURCE,
   CONFIG_SCOPES,
   type ConfigAuditRecord,

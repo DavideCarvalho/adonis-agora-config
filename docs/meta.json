@@ -6,6 +6,7 @@
     "central-server",
     "tenant",
     "authentication",
+    "authkit",
     "secrets",
     "console",
     "commands",

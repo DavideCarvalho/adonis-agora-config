@@ -1,6 +1,7 @@
 ---
 '@adonis-agora/config': minor
 '@adonis-agora/config-core': minor
+'@adonis-agora/config-client': minor
 '@adonis-agora/config-dashboard': minor
 ---
 
@@ -18,3 +19,7 @@ The console lists and edits entries per app/environment/label, diffs any two ver
 shows who changed what (secrets masked until an audited reveal). The CLI (`config:entry:*`,
 `config:history`, `config:rollback`, `config:env`) and the MCP dev tools use the same admin service,
 and `agora:doctor` checks the server, the token and the snapshot.
+
+`@adonis-agora/config-client` reads a scope from any runtime with a shared secret or authkit client
+credentials; `tokens.authkit()` is the same source for an Adonis tenant, and `config:pull` writes the
+managed `.env.local` block that Sail consumes without shadowing its per-worktree ports.

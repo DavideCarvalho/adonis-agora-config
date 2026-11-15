@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IgnitorFactory } from '@adonisjs/core/factories';
@@ -16,7 +17,13 @@ import {
   ConfigRollback,
   ConfigVersionShow,
 } from '../../commands/config.js';
+import ConfigPull from '../../commands/pull.js';
+import { secretCodec } from '../../src/crypto/secrets.js';
 import { defineConfig, stores } from '../../src/define_config.js';
+import { ControlPlane } from '../../src/http/control_plane.js';
+import { MemoryStore } from '../../src/store/memory_store.js';
+import { sharedSecretVerifier } from '../../src/topology/verify.js';
+import { addressOf, type Handler, serve } from '../http_harness.js';
 
 /** The config:* commands through the real ace kernel of a booted control plane. */
 describe('commands', () => {
@@ -26,6 +33,7 @@ describe('commands', () => {
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'config-cmd-'));
+    mkdirSync(join(process.cwd(), 'test/unit/tmp'), { recursive: true });
     const ignitor = new IgnitorFactory()
       .merge({
         rcFileContents: { providers: [() => import('../../providers/config_provider.js')] },
@@ -51,6 +59,9 @@ describe('commands', () => {
     vi.restoreAllMocks();
     await app.terminate();
     rmSync(dir, { recursive: true, force: true });
+    for (const file of ['.env.local', '.env.remote', '.gitignore']) {
+      rmSync(join(app.makePath(), file), { force: true });
+    }
   });
 
   async function run(command: never, args: string[]) {
@@ -210,6 +221,119 @@ describe('commands', () => {
         .map((log) => log.message)
         .join('\n'),
     ).toContain('DB_HOST=localhost');
+  });
+
+  it('pulls values into the managed block, keeping local (Sail) keys and secrets masked', async () => {
+    await seed();
+    const root = app.makePath();
+    writeFileSync(
+      join(root, '.env.local'),
+      '# sail:start\nDB_HOST=127.0.0.1\nDB_PORT=5789\n# sail:end\n',
+    );
+
+    const pull = await run(ConfigPull as never, [
+      '--application=shop',
+      '--environment=production',
+      '--write=.env.local',
+      '--json',
+    ]);
+    pull.instance.assertSucceeded();
+    expect(pull.json()).toMatchObject({
+      source: 'store',
+      file: '.env.local',
+      added: ['CHECKOUT_TIMEOUT_MS'],
+      skipped: ['DB_HOST'],
+      gitignore: 'added',
+    });
+    const file = readFileSync(join(root, '.env.local'), 'utf8');
+    expect(file).toContain('# config:start');
+    expect(file).toContain('DB_HOST=127.0.0.1');
+    expect(file).toContain('CHECKOUT_TIMEOUT_MS=3000');
+    expect(file).not.toContain('STRIPE_SECRET=sk_test');
+    expect(file).toContain('DB_PORT=5789');
+    expect(file.indexOf('# config:start')).toBeLessThan(file.indexOf('# sail:start'));
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toContain('.env.local');
+
+    const again = await run(ConfigPull as never, [
+      '--application=shop',
+      '--environment=production',
+      '--write=.env.local',
+      '--json',
+    ]);
+    expect(again.json().added).toEqual(['CHECKOUT_TIMEOUT_MS']);
+    expect(readFileSync(join(root, '.env.local'), 'utf8')).toBe(file);
+
+    await run(ConfigPull as never, [
+      '--application=shop',
+      '--environment=production',
+      '--write=.env.remote',
+      '--secrets',
+      '--json',
+    ]);
+    expect(readFileSync(join(root, '.env.remote'), 'utf8')).toContain('STRIPE_SECRET=sk_test');
+  });
+
+  it('refuses to write into a varlock-encrypted file', async () => {
+    await seed();
+    const root = app.makePath();
+    writeFileSync(join(root, '.env.local'), 'SECRET=varlock(local:abc)\n');
+    const pull = await run(ConfigPull as never, [
+      '--application=shop',
+      '--environment=production',
+      '--write=.env.local',
+      '--json',
+    ]);
+    expect(pull.instance.exitCode).toBe(1);
+    expect(readFileSync(join(root, '.env.local'), 'utf8')).toBe('SECRET=varlock(local:abc)\n');
+  });
+
+  it('prints KEY=value without --write and can fetch from a remote control plane', async () => {
+    await seed();
+    const local = await run(ConfigPull as never, [
+      '--application=shop',
+      '--environment=production',
+      '--json',
+    ]);
+    expect(local.json()).toMatchObject({
+      source: 'store',
+      env: { DB_HOST: 'localhost', CHECKOUT_TIMEOUT_MS: '3000' },
+    });
+
+    const store = new MemoryStore({ secretCodec: secretCodec('remote-test') });
+    await store.write(
+      { app: 'billing', environment: 'production', label: 'main' },
+      [{ key: 'db.host', value: 'remote-host' }],
+      { actor: 'ann', now: new Date().toISOString() },
+    );
+    const controlPlane = new ControlPlane({
+      store,
+      verifyTenant: sharedSecretVerifier({ partitions: { billing: 'billing-secret' } }),
+      environment: 'production',
+    });
+    const routes: Array<{ method: string; pattern: string; handler: Handler }> = [];
+    controlPlane.register({
+      get(pattern, handler) {
+        routes.push({ method: 'GET', pattern, handler });
+        return { as: () => {} };
+      },
+    });
+    const server: Server = await serve(routes);
+    try {
+      const remote = await run(ConfigPull as never, [
+        '--application=billing',
+        '--environment=production',
+        `--url=${addressOf(server)}/_config`,
+        '--token=billing-secret',
+        '--json',
+      ]);
+      remote.instance.assertSucceeded();
+      expect(remote.json()).toMatchObject({
+        source: 'remote',
+        env: { DB_HOST: 'remote-host' },
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it('records cli:<os user> as the actor and refuses a value-less set', async () => {

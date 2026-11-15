@@ -162,6 +162,11 @@ export class TenantClient {
     return this.options.label ?? DEFAULT_LABEL;
   }
 
+  /** The control plane URL this client reads (used by `config:pull`). */
+  get url(): string {
+    return this.options.url.replace(/\/$/, '');
+  }
+
   get #base(): string {
     return this.options.url.replace(/\/$/, '');
   }

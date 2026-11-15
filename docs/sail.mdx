@@ -52,6 +52,24 @@ Precedence, from strongest to weakest:
 In production `localEnv` is off: the config server is the source of truth, and only the bootstrap's
 "never overwrite" rule remains (so a platform-injected variable still wins).
 
+## Pulling the server's values too
+
+Sail owns ports; the config server owns the rest. `config:pull` writes the server's keys into the
+same `.env.local`, in a block of its own, and **skips any key the file already sets** — so Sail's
+ports always win:
+
+```sh
+export CONFIG_URL=https://config.example.com/_config
+export AUTHKIT_ISSUER=https://auth.example.com
+export AUTHKIT_CLIENT_ID=streaming
+export AUTHKIT_CLIENT_SECRET=…
+node ace config:pull --application=streaming --write=.env.local
+```
+
+The block sits above `# sail:start`, is re-runnable, and is added to `.gitignore`. Without
+`--write`, the command prints `KEY=value` for `eval`/varlock. See [Authkit](/docs/config/authkit)
+for the client-credentials setup.
+
 ## Checking it
 
 ```ts
