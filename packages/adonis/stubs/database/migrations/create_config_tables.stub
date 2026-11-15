@@ -1,7 +1,7 @@
 import { BaseSchema } from '@adonisjs/lucid/schema'
 
 /**
- * The two tables @adonis-agora/config owns. The provider creates them at boot by default
+ * The tables @adonis-agora/config owns. The provider creates them at boot by default
  * (`autoCreateSchema: true`); this migration is for teams that manage every table themselves.
  */
 export default class extends BaseSchema {
@@ -35,9 +35,22 @@ export default class extends BaseSchema {
       table.string('at', 32).notNullable()
       table.index(['app', 'environment', 'label', 'at'])
     })
+
+    // The public X25519 keys tenant apps registered, for secrets sealed to them.
+    this.schema.createTable('config_tenant_keys', (table) => {
+      table.string('id', 36).notNullable().primary()
+      table.string('app', 128).notNullable()
+      table.string('kid', 128).notNullable()
+      table.text('public_key').notNullable()
+      table.integer('active').notNullable().defaultTo(0)
+      table.string('created_by', 255).notNullable()
+      table.string('created_at', 32).notNullable()
+      table.unique(['app', 'kid'])
+    })
   }
 
   async down() {
+    this.schema.dropTable('config_tenant_keys')
     this.schema.dropTable('config_audit')
     this.schema.dropTable('config_versions')
   }

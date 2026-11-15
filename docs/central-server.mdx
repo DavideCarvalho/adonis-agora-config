@@ -32,15 +32,17 @@ export default defineConfig({
 
 ## Storage
 
-`stores.lucid()` (the default) keeps the configuration in two tables, created at boot:
+`stores.lucid()` (the default) keeps the configuration in three tables, created at boot:
 
 | Table | Holds |
 | --- | --- |
 | `config_versions` | one row per version: the app, environment, label, version number, the entries as JSON, the fingerprint, who wrote it and why |
 | `config_audit` | one row per changed key (and per rollback and secret reveal): actor, action, before and after |
+| `config_tenant_keys` | the public X25519 keys tenant apps registered, for values sealed to them (never a private key) |
 
 `stores.memory()` is for tests and local development. Secrets are sealed before either store sees
-them, so a dump of the memory store or of the table never holds a plain value.
+them, so a dump of the memory store or of the table never holds a plain value. A value sealed to an
+app is `agora:pk1:…` ciphertext there: even the server cannot open it.
 
 For a schema other than the connection's default:
 
