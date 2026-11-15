@@ -3,6 +3,7 @@ import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ConfigAdmin } from '../../src/admin.js';
 import { ControlPlane } from '../../src/http/control_plane.js';
 import type { ConfigStore } from '../../src/store/store.js';
 import { memoryConfig, seedConfig, testScope } from '../../src/testing/index.js';
@@ -139,6 +140,49 @@ describe('tenant client', () => {
     const snapshot = JSON.parse(await readFile(path, 'utf8'));
     expect(snapshot.version).toBe(2);
     expect(snapshot.entries['db.host'].value).toBe('db.internal');
+  });
+
+  it('reloads a pushed change over the stream without waiting for the poll', async () => {
+    const store = memoryConfig();
+    await seedConfig(store, testScope, [
+      { key: 'checkout.timeoutMs', value: 3000, reloadable: true },
+      { key: 'db.host', value: 'localhost' },
+    ]);
+    const { url, controlPlane } = await startServer(store);
+    const tenant = client({
+      url,
+      partition: 'shop',
+      token: 'shop-secret',
+      stream: true,
+      intervalMs: 60_000,
+    });
+    await tenant.start();
+    // Let the stream connect before writing, so the event is not sent before there is a listener.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const arriving = new Promise<{ reloadable: string[]; restartRequired: string[] }>(
+      (resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no push within 3s')), 3_000);
+        tenant.onChange((change) => {
+          clearTimeout(timer);
+          resolve(change);
+        });
+      },
+    );
+    const admin = new ConfigAdmin({
+      store,
+      onChange: (scope, version) => controlPlane.bus.publish(scope, version),
+    });
+    await admin.setEntry(
+      testScope,
+      'checkout.timeoutMs',
+      { value: 9000 },
+      { actor: 'ann', now: new Date().toISOString() },
+    );
+    const change = await arriving;
+    expect(change.reloadable).toContain('checkout.timeoutMs');
+    expect(tenant.get('checkout.timeoutMs')).toBe(9000);
+    // A boot-time key keeps its boot value.
+    expect(tenant.get('db.host')).toBe('localhost');
   });
 
   it('treats extra `tenant.reloadable` keys (and prefixes) as reloadable', async () => {
