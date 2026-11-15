@@ -58,6 +58,10 @@ are created there as `agora.config_versions`, …; every query names the schema,
 `autoCreateSchema: false` turns the boot-time DDL off when migrations own the tables (the migration
 stub in `stubs/database` takes the same `{ schema: 'agora' }`).
 
+To announce changes to broker-backed tenants, add `transport: transports.redis(...)` or
+`transports.durable(...)`; the HTTP API stays mounted for browsers, the console and http tenants. See
+[Transports](/docs/config/transports).
+
 ## Versions, history and rollback
 
 A version is a number per scope, starting at 1. Reading a scope returns its latest version; reading

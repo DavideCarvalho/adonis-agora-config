@@ -11,6 +11,7 @@ import {
   unflattenObject,
 } from '@adonis-agora/config-core';
 import { entryAad } from '../crypto/secrets.js';
+import type { ConfigTransport } from '../transports/types.js';
 import type { TenantKeyring } from './tenant_keyring.js';
 import { resolveTenantToken, type TenantToken, type TenantTokenSource } from './token.js';
 
@@ -81,6 +82,11 @@ export interface TenantClientOptions {
   keys?: TenantKeyring;
   /** Publish `keys` to the control plane on connect. Default `true` when `keys` is set. */
   registerKeys?: boolean;
+  /**
+   * How the tenant watches the control plane. Default: HTTP SSE + polling. `transports.redis` /
+   * `transports.durable` replace only the watch channel; the document is fetched over HTTP.
+   */
+  transport?: ConfigTransport;
   stream?: boolean;
   intervalMs?: number;
   /** Throw when the server is unreachable AND no snapshot exists. Default `false`. */
@@ -173,6 +179,7 @@ export class TenantClient {
   #stopped = false;
   #timer: NodeJS.Timeout | undefined;
   #streamAbort: AbortController | undefined;
+  #watchStop: (() => void) | undefined;
   #refreshing: Promise<boolean> | undefined;
   #keys: TenantKeyring | undefined;
   #keysRegistered: boolean | null = null;
@@ -181,8 +188,19 @@ export class TenantClient {
 
   constructor(private readonly options: TenantClientOptions) {
     this.#token = resolveTenantToken(options.token);
-    this.#fetch = options.fetch ?? fetch;
+    this.#fetch = options.transport?.fetch ?? options.fetch ?? fetch;
     this.#keys = options.keys;
+  }
+
+  /** A conditional GET, with the transport's timeout when it set one. */
+  #request(url: string, init: RequestInit): Promise<Response> {
+    const timeout = this.options.transport?.timeoutMs;
+    return this.#fetch(
+      url,
+      timeout === undefined || timeout <= 0
+        ? init
+        : { ...init, signal: init.signal ?? AbortSignal.timeout(timeout) },
+    );
   }
 
   get app(): string {
@@ -203,7 +221,7 @@ export class TenantClient {
   }
 
   get #base(): string {
-    return this.options.url.replace(/\/$/, '');
+    return (this.options.transport?.url ?? this.options.url).replace(/\/$/, '');
   }
 
   #headers(): Record<string, string> {
@@ -253,7 +271,14 @@ export class TenantClient {
     const interval = this.options.intervalMs ?? (streaming ? 30_000 : 5_000);
     this.#timer = setInterval(() => void this.refresh(), interval);
     this.#timer.unref();
-    if (streaming) void this.#openStream();
+    if (this.options.transport?.watch) {
+      this.#watchStop = await this.options.transport.watch(
+        { app: this.app, environment: this.environment, label: this.label },
+        () => void this.refresh(),
+      );
+    } else if (streaming) {
+      void this.#openStream();
+    }
   }
 
   /** The values as the app may use them: reloadable keys from the latest document, the rest from boot. */
@@ -519,7 +544,7 @@ export class TenantClient {
           headers['if-none-match'] =
             `"${this.app}:${this.environment}:${this.label}:${this.#version}"`;
         }
-        return this.#fetch(`${this.#base}/v1/config`, { headers });
+        return this.#request(`${this.#base}/v1/config`, { headers });
       };
       let response = await request();
       if (response.status === 401) {
@@ -704,25 +729,46 @@ export class TenantClient {
 
   async #loadSnapshot(): Promise<void> {
     const path = this.options.snapshotPath;
-    if (!path) return;
-    try {
-      const [text, info] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
-      const raw = JSON.parse(text) as ConfigDocumentView;
-      const document = this.#resolveSealed(raw);
-      this.#document = document;
-      this.#boot = { ...document.entries };
-      this.#live = {};
-      this.#version = document.version;
-      this.#fingerprint = document.fingerprint;
-      this.#loadedAt = new Date(info.mtimeMs);
-      this.#source = 'snapshot';
-      this.options.logger?.warn(
-        `[@adonis-agora/config] ${this.app}: control plane unreachable, booted from the snapshot (v${document.version})`,
-      );
-      if (this.options.env) this.#applyEnv();
-    } catch {
-      // No snapshot yet: the caller decides whether that is fatal.
+    if (path) {
+      try {
+        const [text, info] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
+        const raw = JSON.parse(text) as ConfigDocumentView;
+        const document = this.#resolveSealed(raw);
+        this.#document = document;
+        this.#boot = { ...document.entries };
+        this.#live = {};
+        this.#version = document.version;
+        this.#fingerprint = document.fingerprint;
+        this.#loadedAt = new Date(info.mtimeMs);
+        this.#source = 'snapshot';
+        this.options.logger?.warn(
+          `[@adonis-agora/config] ${this.app}: control plane unreachable, booted from the snapshot (v${document.version})`,
+        );
+        if (this.options.env) this.#applyEnv();
+        return;
+      } catch {
+        // Fall through to the broker snapshot.
+      }
     }
+
+    // No local snapshot: a broker may keep the last masked one (never the secrets).
+    const remote = await this.options.transport?.snapshot?.({
+      app: this.app,
+      environment: this.environment,
+      label: this.label,
+    });
+    if (!remote) return;
+    this.#document = remote;
+    this.#boot = { ...remote.entries };
+    this.#live = {};
+    this.#version = remote.version;
+    this.#fingerprint = remote.fingerprint;
+    this.#loadedAt = new Date();
+    this.#source = 'snapshot';
+    this.options.logger?.warn(
+      `[@adonis-agora/config] ${this.app}: control plane unavailable, booted from the broker snapshot (v${remote.version})`,
+    );
+    if (this.options.env) this.#applyEnv();
   }
 
   /** Reads `event: config` messages; reconnects with backoff while the client runs. */
@@ -775,6 +821,8 @@ export class TenantClient {
     this.#started = false;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;
+    this.#watchStop?.();
+    this.#watchStop = undefined;
     this.#streamAbort?.abort();
   }
 }

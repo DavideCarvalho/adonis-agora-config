@@ -51,6 +51,7 @@ import {
 } from '../src/topology/tenant_client.js';
 import { DEFAULT_TENANT_KEY_PATH, TenantKeyring } from '../src/topology/tenant_keyring.js';
 import { resolveTenantVerifier } from '../src/topology/verify.js';
+import type { ConfigTransport } from '../src/transports/types.js';
 
 declare module '@adonisjs/core/types' {
   interface ContainerBindings {
@@ -146,14 +147,18 @@ export default class ConfigProvider {
     });
     const bootstrapped = takeTenantBootstrap(key);
     const keys = await this.#tenantKeyring(config, logger);
+    const transport = config.tenant.transport
+      ? await config.tenant.transport({ app: this.app as never })
+      : undefined;
     const client: TenantClient =
       bootstrapped ??
       createTenantClient({
         ...(keys ? { keys } : {}),
+        ...(transport ? { transport } : {}),
         ...(config.tenant.registerKey !== undefined
           ? { registerKeys: config.tenant.registerKey }
           : {}),
-        url: config.tenant.url,
+        url: transport?.url ?? config.tenant.url,
         partition: config.tenant.partition,
         token: config.tenant.token,
         environment: resolved.environment,
@@ -258,6 +263,10 @@ export default class ConfigProvider {
   ): Promise<ConfigRuntime> {
     const container = this.app.container;
     const codec = await this.#secretCodec(config.crypto);
+    const transport: ConfigTransport | undefined =
+      config.topology === 'control-plane' && config.transport
+        ? await config.transport({ app: this.app as never })
+        : undefined;
     const autoCreateSchema = config.autoCreateSchema ?? true;
     const factoryContext: FactoryContext = {
       app: this.app,
@@ -294,6 +303,7 @@ export default class ConfigProvider {
         ...(config.prefix ? { prefix: config.prefix } : {}),
         ...(config.corsOrigins ? { corsOrigins: config.corsOrigins } : {}),
         ...(config.vault ? { vault: config.vault.resolve } : {}),
+        ...(transport ? { transport } : {}),
         logger,
       });
     }
@@ -301,6 +311,7 @@ export default class ConfigProvider {
       store,
       canRevealSecrets: consoleConfig.revealSecrets,
       ...(config.vault ? { vault: config.vault.resolve } : {}),
+      ...(transport ? { transport } : {}),
       // Every write (console, MCP, command) reaches the streams of this process immediately; another
       // replica catches up on the stream's own 15s version poll.
       ...(controlPlane

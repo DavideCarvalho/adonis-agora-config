@@ -8,6 +8,7 @@ import { MemoryStore } from './store/memory_store.js';
 import type { ConfigStore } from './store/store.js';
 import type { TenantTokenSource } from './topology/token.js';
 import type { TenantVerifierInput } from './topology/verify.js';
+import type { ConfigTransportFactory } from './transports/types.js';
 
 /** What store factories receive. */
 export interface FactoryContext {
@@ -108,6 +109,12 @@ export interface ControlPlaneConfig extends BaseConfig {
   schema?: string;
   /** Mount the console (the SPA + its JSON API). Default on. */
   console?: ConfigConsoleConfig | false;
+  /**
+   * How this control plane announces changes to broker-backed tenants (`transports.redis(...)`,
+   * `transports.durable(...)`). The HTTP API stays mounted regardless: browsers, the console and
+   * http tenants always use it.
+   */
+  transport?: ConfigTransportFactory;
 }
 
 /** An app that reads its configuration from a control plane. */
@@ -161,6 +168,12 @@ export interface TenantTopologyConfig extends BaseConfig {
     keyPath?: string | false;
     /** Publish the public key to the control plane on connect. Default `true` when `keyPath` is on. */
     registerKey?: boolean;
+    /**
+     * How this tenant watches the control plane. Default `transports.http()` (SSE + poll); use
+     * `transports.redis(...)` or `transports.durable(...)` to watch over a broker. The document is
+     * always fetched over HTTP with this tenant's token.
+     */
+    transport?: ConfigTransportFactory;
   };
   /** FORBIDDEN on a tenant: it owns no configuration; it reads the control plane's. */
   store?: never;

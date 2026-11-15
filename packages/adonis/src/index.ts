@@ -140,3 +140,13 @@ export {
   type TenantVerifierObject,
   type VerifiedTenant,
 } from './topology/verify.js';
+export {
+  type ConfigTransport,
+  type ConfigTransportContext,
+  type ConfigTransportFactory,
+  type DurableControlPlaneLike,
+  type DurableTransportConfig,
+  type HttpTransportConfig,
+  type RedisTransportConfig,
+  transports,
+} from './transports/index.js';
