@@ -36,7 +36,7 @@ node ace config:tenant:key --rotate
 | `config:rollback --to=<version>` | writes a new version from a past one; asks unless `--force` |
 | `config:env` | the resolved values as `KEY=value`, for `eval`/pipes; `--secrets` (audited), `--prefix` |
 | `config:pull` | writes the managed `.env.local` block (or prints without `--write`); `--url`, `--token`, authkit flags, `--secrets` (audited) |
-| `config:crypto:reseal` | re-seals values with the active crypto key; `--dry-run`, `--json` |
+| `config:crypto:reseal` | re-seals values with the active key; `--all` (after rotating `config/encryption.ts`), `--dry-run`, `--json` |
 | `config:tenant:key` | the tenant's X25519 key for sealed secrets: show, `--rotate`, `--reseal`, `--dry-run`; on a server, list an app's public keys with `--application` |
 
 Every command takes `--application`, `--environment` and `--label` (defaults: the app in the

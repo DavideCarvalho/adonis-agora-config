@@ -86,7 +86,7 @@ export interface ConfigStore {
   /** How the stored secrets stand against the active key (doctor). */
   cryptoStatus?(): Promise<CryptoStatusCounts>;
   /** Re-seals values written with a retired/legacy key with the active one (the reseal command). */
-  reseal?(options: { dryRun?: boolean }): Promise<ResealReport>;
+  reseal?(options: { dryRun?: boolean; all?: boolean }): Promise<ResealReport>;
 }
 
 /**
@@ -117,6 +117,8 @@ export interface CryptoStatusCounts {
 
 export interface ResealReport {
   dryRun: boolean;
+  /** Rewrite every value, even one that already opens with the active key (rotated app key). */
+  all: boolean;
   /** Secret values inspected. */
   scanned: number;
   /** Values re-sealed (in a dry run: values that would be). */
@@ -136,6 +138,7 @@ export async function resealStoredEntry(
   aad: string,
   codec: SecretCodec,
   dryRun: boolean,
+  all: boolean,
   counts: ResealReport,
 ): Promise<ConfigEntryState> {
   if (!entry.secret || entry.vault !== undefined || entry.sealedTo !== undefined) return entry;
@@ -150,17 +153,17 @@ export async function resealStoredEntry(
     return entry;
   }
   counts.statuses[status] += 1;
-  if (status === 'active') return entry;
   if (status === 'unreadable') {
     counts.failed += 1;
     return entry;
   }
+  if (status === 'active' && !all) return entry;
   if (dryRun) {
     counts.resealed += 1;
     return entry;
   }
   try {
-    const value = await codec.reseal(entry.value, { aad });
+    const value = await codec.reseal(entry.value, { aad, force: all });
     counts.resealed += 1;
     return { ...entry, value };
   } catch {
@@ -199,7 +202,7 @@ export class DocumentSealer {
       return { ...entry };
     if (!this.codec) {
       throw new Error(
-        '@adonis-agora/config: a secret was written but no encryption keyring is configured. Set APP_KEY or pass `crypto.keys` in config/config.ts.',
+        '@adonis-agora/config: a secret was written but no encryption keyring is configured. Set up `config/encryption.ts` (the default), or pass `crypto.keys` in config/config.ts.',
       );
     }
     return { ...entry, value: await this.codec.seal(entry.value, { aad }) };
@@ -215,7 +218,7 @@ export class DocumentSealer {
       return { ...entry };
     if (!this.codec) {
       throw new Error(
-        '@adonis-agora/config: a secret was read but no encryption keyring is configured. Set APP_KEY or pass `crypto.keys` in config/config.ts.',
+        '@adonis-agora/config: a secret was read but no encryption keyring is configured. Set up `config/encryption.ts` (the default), or pass `crypto.keys` in config/config.ts.',
       );
     }
     if (typeof entry.value !== 'string' || !this.codec.owns(entry.value)) {

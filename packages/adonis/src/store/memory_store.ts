@@ -184,9 +184,10 @@ export class MemoryStore implements ConfigStore {
     return { rows, total: matching.length };
   }
 
-  async #reseal(dryRun: boolean): Promise<ResealReport> {
+  async #reseal(dryRun: boolean, all: boolean): Promise<ResealReport> {
     const report: ResealReport = {
       dryRun,
+      all,
       scanned: 0,
       resealed: 0,
       failed: 0,
@@ -202,6 +203,7 @@ export class MemoryStore implements ConfigStore {
             entryAad(document, key),
             codec,
             dryRun,
+            all,
             report,
           );
         }
@@ -210,21 +212,21 @@ export class MemoryStore implements ConfigStore {
     for (const record of this.#audit) {
       const aad = entryAad(record, record.key ?? '');
       if (record.before) {
-        record.before = await resealStoredEntry(record.before, aad, codec, dryRun, report);
+        record.before = await resealStoredEntry(record.before, aad, codec, dryRun, all, report);
       }
       if (record.after) {
-        record.after = await resealStoredEntry(record.after, aad, codec, dryRun, report);
+        record.after = await resealStoredEntry(record.after, aad, codec, dryRun, all, report);
       }
     }
     return report;
   }
 
   async cryptoStatus(): Promise<CryptoStatusCounts> {
-    return (await this.#reseal(true)).statuses;
+    return (await this.#reseal(true, false)).statuses;
   }
 
-  async reseal(options: { dryRun?: boolean } = {}): Promise<ResealReport> {
-    return this.#reseal(options.dryRun === true);
+  async reseal(options: { dryRun?: boolean; all?: boolean } = {}): Promise<ResealReport> {
+    return this.#reseal(options.dryRun === true, options.all === true);
   }
 
   async listTenantKeys(app: string): Promise<TenantPublicKey[]> {

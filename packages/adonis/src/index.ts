@@ -41,6 +41,7 @@ export {
   type CryptoKey,
   type CryptoOptions,
   createConfigKeyring,
+  type EncrypterLike,
   entryAad,
   isKitValue,
   keyringCodec,

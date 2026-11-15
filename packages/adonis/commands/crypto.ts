@@ -15,6 +15,12 @@ export default class ConfigCryptoReseal extends BaseCommand {
   @flags.boolean({ description: 'Count what would be re-sealed; change nothing' })
   declare dryRun: boolean;
 
+  @flags.boolean({
+    description:
+      "Rewrite every value, even one that already opens (after rotating config/encryption.ts' keys)",
+  })
+  declare all: boolean;
+
   @flags.boolean({ description: 'Print one JSON object to stdout' })
   declare json: boolean;
 
@@ -44,12 +50,15 @@ export default class ConfigCryptoReseal extends BaseCommand {
       return;
     }
 
-    const report = await store.reseal({ dryRun: this.dryRun === true });
+    const report = await store.reseal({
+      dryRun: this.dryRun === true,
+      all: this.all === true,
+    });
     if (this.json) {
       process.stdout.write(`${JSON.stringify(report)}\n`);
     } else {
       this.logger.info(
-        `${this.dryRun ? 'would re-seal' : 're-sealed'} ${report.resealed} of ${report.scanned} secret value(s)`,
+        `${this.dryRun ? 'would re-seal' : 're-sealed'} ${report.resealed} of ${report.scanned} secret value(s)${report.all ? ' (--all)' : ''}`,
       );
       const table = this.ui.table();
       table.head(['Status', 'Values']);

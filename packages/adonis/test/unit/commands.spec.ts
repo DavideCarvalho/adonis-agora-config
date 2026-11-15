@@ -355,7 +355,14 @@ describe('commands', () => {
 
     const real = await run(ConfigCryptoReseal as never, ['--json']);
     real.instance.assertSucceeded();
-    expect(real.json()).toMatchObject({ dryRun: false, resealed: 0, failed: 0 });
+    expect(real.json()).toMatchObject({ all: false, dryRun: false, resealed: 0, failed: 0 });
+
+    // `--all` rewrites even values already on the active key (rotating the app's own key).
+    const all = await run(ConfigCryptoReseal as never, ['--all', '--dry-run', '--json']);
+    all.instance.assertSucceeded();
+    expect(all.json()).toMatchObject({ all: true, dryRun: true, failed: 0 });
+    expect(all.json().resealed).toBe(all.json().scanned);
+    expect(all.json().resealed).toBeGreaterThan(0);
   });
 
   it('seals an entry from the CLI and lists the registered app keys', async () => {

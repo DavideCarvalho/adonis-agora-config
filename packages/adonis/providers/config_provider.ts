@@ -5,6 +5,7 @@ import { ConfigAdmin } from '../src/admin.js';
 import {
   type CryptoOptions,
   createConfigKeyring,
+  type EncrypterLike,
   keyringCodec,
   type SecretCodec,
 } from '../src/crypto/secrets.js';
@@ -203,10 +204,10 @@ export default class ConfigProvider {
   ): Promise<TenantKeyring | undefined> {
     if (config.tenant.keyPath === false) return undefined;
     const relative = config.tenant.keyPath ?? DEFAULT_TENANT_KEY_PATH;
-    const codec = this.#secretCodec(undefined);
+    const codec = await this.#secretCodec(undefined);
     if (!codec) {
       logger.warn(
-        '[@adonis-agora/config] no APP_KEY: this app cannot hold an X25519 key, so secrets sealed to it stay unreadable',
+        '[@adonis-agora/config] no encryption key (config/encryption.ts or APP_KEY): this app cannot hold an X25519 key, so secrets sealed to it stay unreadable',
       );
       return undefined;
     }
@@ -228,7 +229,7 @@ export default class ConfigProvider {
     logger: { info(message: string): void; warn(message: string): void },
   ): Promise<ConfigRuntime> {
     const container = this.app.container;
-    const codec = this.#secretCodec(config.crypto);
+    const codec = await this.#secretCodec(config.crypto);
     const autoCreateSchema = config.autoCreateSchema ?? true;
     const factoryContext: FactoryContext = {
       app: this.app,
@@ -298,18 +299,48 @@ export default class ConfigProvider {
   }
 
   /**
-   * The crypto kit keyring: `crypto.keys`/`crypto.active` when configured, else one `app` key
-   * derived from APP_KEY. Without a usable key there is no codec: writing a secret fails loudly.
+   * The crypto kit keyring. Default: the app's own encryption service (`config/encryption.ts`), so
+   * an app that configures nothing keeps working and rotates there (`--all` re-seals). `crypto.keys`
+   * lets this package own the keys instead; APP_KEY is the last-resort fallback. Without any usable
+   * key there is no codec: writing a secret fails loudly.
    */
-  #secretCodec(crypto: CryptoOptions | undefined): SecretCodec | undefined {
+  async #secretCodec(crypto: CryptoOptions | undefined): Promise<SecretCodec | undefined> {
     try {
+      if (crypto?.keys?.length || crypto?.encryption) {
+        return keyringCodec(
+          createConfigKeyring({
+            ...(crypto.keys ? { keys: crypto.keys } : {}),
+            ...(crypto.active ? { active: crypto.active } : {}),
+            ...(crypto.encryption ? { encryption: crypto.encryption } : {}),
+            ...(crypto.kms ? { kms: crypto.kms } : {}),
+          }),
+        );
+      }
+      const encryption = await this.#appEncryption();
+      if (encryption) {
+        return keyringCodec(
+          createConfigKeyring({
+            encryption,
+            ...(crypto?.kms ? { kms: crypto.kms } : {}),
+          }),
+        );
+      }
       return keyringCodec(
         createConfigKeyring({
-          ...(crypto?.keys ? { keys: crypto.keys } : {}),
-          ...(crypto?.active ? { active: crypto.active } : {}),
           appKey: process.env.APP_KEY,
+          ...(crypto?.kms ? { kms: crypto.kms } : {}),
         }),
       );
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The app's `encryption` service (`config/encryption.ts`), when the app configured one. */
+  async #appEncryption(): Promise<EncrypterLike | undefined> {
+    try {
+      if (!this.app.container.hasBinding('encryption')) return undefined;
+      return (await this.app.container.make('encryption')) as EncrypterLike;
     } catch {
       return undefined;
     }

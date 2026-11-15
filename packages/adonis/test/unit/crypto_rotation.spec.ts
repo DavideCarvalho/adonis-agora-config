@@ -92,6 +92,14 @@ describe('crypto rotation', () => {
       legacy: 0,
       unreadable: 0,
     });
+
+    // `--all` is for rotating the app's own key, which the kit cannot tell apart: it rewrites
+    // even values that already report `active`.
+    const dryAll = await after.reseal({ dryRun: true, all: true });
+    expect(dryAll).toMatchObject({ all: true, dryRun: true, scanned: 2, resealed: 2, failed: 0 });
+    const realAll = await after.reseal({ all: true });
+    expect(realAll).toMatchObject({ all: true, dryRun: false, resealed: 2, failed: 0 });
+    expect(await after.cryptoStatus()).toMatchObject({ active: 2 });
     expect((await after.read(testScope))?.entries.p?.value).toBe('hunter2');
 
     // The historical version and the audit before/after were re-sealed too.

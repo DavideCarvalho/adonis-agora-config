@@ -462,9 +462,10 @@ export class LucidStore implements ConfigStore {
     };
   }
 
-  async #reseal(dryRun: boolean): Promise<ResealReport> {
+  async #reseal(dryRun: boolean, all: boolean): Promise<ResealReport> {
     const report: ResealReport = {
       dryRun,
+      all,
       scanned: 0,
       resealed: 0,
       failed: 0,
@@ -488,6 +489,7 @@ export class LucidStore implements ConfigStore {
           entryAad({ app: row.app, environment: row.environment }, key),
           codec,
           dryRun,
+          all,
           report,
         );
         if (next !== entry) {
@@ -516,9 +518,11 @@ export class LucidStore implements ConfigStore {
       const before = parseJson<ConfigEntryState | null>(row.before);
       const after = parseJson<ConfigEntryState | null>(row.after);
       const nextBefore = before
-        ? await resealStoredEntry(before, aad, codec, dryRun, report)
+        ? await resealStoredEntry(before, aad, codec, dryRun, all, report)
         : before;
-      const nextAfter = after ? await resealStoredEntry(after, aad, codec, dryRun, report) : after;
+      const nextAfter = after
+        ? await resealStoredEntry(after, aad, codec, dryRun, all, report)
+        : after;
       if ((nextBefore !== before || nextAfter !== after) && !dryRun) {
         await query(this.db, 'UPDATE config_audit SET before = ?, after = ? WHERE id = ?', [
           jsonValue(nextBefore),
@@ -531,11 +535,11 @@ export class LucidStore implements ConfigStore {
   }
 
   async cryptoStatus(): Promise<CryptoStatusCounts> {
-    return (await this.#reseal(true)).statuses;
+    return (await this.#reseal(true, false)).statuses;
   }
 
-  async reseal(options: { dryRun?: boolean } = {}): Promise<ResealReport> {
-    return this.#reseal(options.dryRun === true);
+  async reseal(options: { dryRun?: boolean; all?: boolean } = {}): Promise<ResealReport> {
+    return this.#reseal(options.dryRun === true, options.all === true);
   }
 
   async listTenantKeys(app: string): Promise<TenantPublicKey[]> {

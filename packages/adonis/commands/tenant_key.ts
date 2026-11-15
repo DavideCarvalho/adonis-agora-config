@@ -45,7 +45,7 @@ export default class ConfigTenantKey extends ConfigCommand {
     const client = runtime.client;
     if (!keys || !client) {
       this.logger.error(
-        'this app has no tenant keyring: set APP_KEY and leave tenant.keyPath on (default storage/config-tenant-key.json)',
+        'this app has no tenant keyring: set up config/encryption.ts (or APP_KEY) and leave tenant.keyPath on (default storage/config-tenant-key.json)',
       );
       this.exitCode = 1;
       return;

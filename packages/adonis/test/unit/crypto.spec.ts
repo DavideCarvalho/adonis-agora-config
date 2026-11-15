@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createConfigKeyring, entryAad, keyringCodec } from '../../src/crypto/secrets.js';
-import { SealedValueError } from '../../src/crypto-kit/index.js';
+import { gcmEncryption, SealedValueError } from '../../src/crypto-kit/index.js';
 
 const appKey = 'a-test-app-key-of-32-characters!';
 const scope = { app: 'shop', environment: 'production' };
@@ -61,6 +61,38 @@ describe('config secret codec (crypto kit)', () => {
     const sealed = await secrets.seal('v', { aad });
     expect(await secrets.open(sealed, { aad })).toBe('v');
     expect(await secrets.status(sealed, { aad })).toBe('active');
+  });
+
+  it('uses an opaque app encryption: everything is active and --all rewrites', async () => {
+    // The app's own encryption (config/encryption.ts) holds both keys: the kit cannot tell which
+    // one sealed a value, so status is always `active` and `force` rewrites after rotation.
+    const secrets = keyringCodec(
+      createConfigKeyring({
+        encryption: gcmEncryption([appKey, 'an-old-app-key-of-32-chars!!!!']),
+      }),
+    );
+    const sealed = await secrets.seal('v', { aad });
+    expect(await secrets.status(sealed, { aad })).toBe('active');
+    expect(await secrets.reseal(sealed, { aad })).toBe(sealed);
+    const forced = await secrets.reseal(sealed, { aad, force: true });
+    expect(forced).not.toBe(sealed);
+    expect(await secrets.open(forced, { aad })).toBe('v');
+  });
+
+  it('refuses keys together with an encryption instance, and active without keys', () => {
+    expect(() =>
+      createConfigKeyring({
+        keys: [appKey],
+        encryption: gcmEncryption([appKey]),
+      }),
+    ).toThrow(/either `crypto.keys` or `crypto.encryption`/);
+    expect(() =>
+      createConfigKeyring({
+        active: '2026-11',
+        encryption: gcmEncryption([appKey]),
+      }),
+    ).toThrow(/only applies with `crypto.keys`/);
+    expect(() => createConfigKeyring({})).toThrow(/no keyring/);
   });
 
   it('refuses a plain string instead of serving it as a secret', async () => {

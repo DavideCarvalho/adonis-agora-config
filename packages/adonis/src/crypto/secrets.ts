@@ -1,6 +1,7 @@
 import type { ConfigValue } from '@adonis-agora/config-core';
 import {
   createKeyring,
+  type EncrypterLike,
   type Keyring,
   type KmsAdapter,
   open,
@@ -12,16 +13,26 @@ import {
   sealedStatus,
 } from '../crypto-kit/index.js';
 
+export type { EncrypterLike };
+
 /** Domain separation for every config secret: one APP_KEY never yields the same key twice. */
 export const CONFIG_SECRET_PURPOSE = 'config:secrets';
 
 /** One key: a secret, or `{ id, secret }` when you want to name the active one. */
 export type CryptoKey = SecretLike | { id: string; secret: SecretLike };
 
-/** Rotation options. The first key seals; `active` names the one that seals, if not the first. */
+/**
+ * Secret encryption. The default (nothing here) is the app's own encryption service
+ * (`config/encryption.ts`), so an app that configures nothing keeps working and rotation happens
+ * there. `keys` lets this package own the keys instead (newest first; the first seals).
+ */
 export interface CryptoOptions {
+  /** Keys, newest first: the first seals, every one opens. `{ id, secret }` names the active one. */
   keys?: CryptoKey[];
+  /** With `{ id, secret }` keys: the id that seals. Ignored by the kit, honored by this wrapper. */
   active?: string;
+  /** The app's `encryption` service, or any Adonis-encryption-shaped one. Default when set up. */
+  encryption?: EncrypterLike;
   /** Envelope encryption: values carry a data key wrapped by this adapter. */
   kms?: KmsAdapter;
 }
@@ -29,6 +40,8 @@ export interface CryptoOptions {
 export interface SealOptions {
   /** Additional authenticated data; the same string must be passed to `open`. */
   aad?: string | undefined;
+  /** Re-seal even a value that already opens with the active key (after rotating the app's key). */
+  force?: boolean;
 }
 
 /** The store's view of encrypting one value (async: a KMS key answers over the network). */
@@ -47,33 +60,59 @@ export function entryAad(scope: { app: string; environment: string }, key: strin
 }
 
 /**
- * The keyring for config secrets: `crypto.keys` (newest first) with `crypto.active` naming the key
- * that seals, or one `app` key derived from APP_KEY. The kit itself has no key ids, so `active` is
- * honored by reordering the secrets before handing them to it.
+ * The keyring for config secrets, on top of the kit:
+ *
+ * - `crypto.keys` (newest first; the first seals) — the kit can then tell a value sealed with an
+ *   older key apart and `config:crypto:reseal` fixes it. `crypto.active` names the sealing key when
+ *   the keys use the `{ id, secret }` form; the kit has no key ids, so this wrapper reorders them.
+ * - `crypto.encryption` — the app's own encryption service (the default in the provider). Its keys
+ *   rotate in `config/encryption.ts`; the kit cannot tell them apart, so `--all` re-seals.
+ * - `appKey` — a last-resort fallback (an app with no encryption config): one `app` key.
  */
 export function createConfigKeyring(options: {
   keys?: CryptoKey[] | undefined;
   active?: string | undefined;
+  encryption?: EncrypterLike | undefined;
   kms?: KmsAdapter | undefined;
   appKey?: SecretLike | undefined;
 }): Keyring {
-  const configured: Array<{ id: string; secret: SecretLike }> =
-    options.keys?.length && options.keys.length > 0
-      ? options.keys.map((key, index) => {
-          const named =
-            typeof key === 'object' && key !== null && 'secret' in key
-              ? (key as { id: string; secret: SecretLike })
-              : { id: `key-${index}`, secret: key as SecretLike };
-          return named;
-        })
-      : [{ id: 'app', secret: options.appKey ?? '' }];
-  const activeId = options.active ?? configured[0]?.id;
-  const active = configured.find((key) => key.id === activeId);
-  if (!active) throw new Error(`crypto: active key "${activeId}" is not in crypto.keys`);
-  const ordered = [active, ...configured.filter((key) => key !== active)];
+  if (options.keys?.length && options.encryption !== undefined) {
+    throw new Error('crypto: give either `crypto.keys` or `crypto.encryption`, not both');
+  }
+  if (options.keys?.length) {
+    const configured = options.keys.map((key, index) => {
+      const named =
+        typeof key === 'object' && key !== null && 'secret' in key
+          ? (key as { id: string; secret: SecretLike })
+          : { id: `key-${index}`, secret: key as SecretLike };
+      return named;
+    });
+    const activeId = options.active ?? configured[0]?.id;
+    const active = configured.find((key) => key.id === activeId);
+    if (!active) throw new Error(`crypto: active key "${activeId}" is not in crypto.keys`);
+    const ordered = [active, ...configured.filter((key) => key !== active)];
+    return createKeyring({
+      purpose: CONFIG_SECRET_PURPOSE,
+      keys: ordered.map((key) => key.secret),
+      ...(options.kms !== undefined ? { kms: options.kms } : {}),
+    });
+  }
+  if (options.encryption !== undefined) {
+    if (options.active !== undefined) {
+      throw new Error('crypto: `active` only applies with `crypto.keys`');
+    }
+    return createKeyring({
+      purpose: CONFIG_SECRET_PURPOSE,
+      encryption: options.encryption,
+      ...(options.kms !== undefined ? { kms: options.kms } : {}),
+    });
+  }
+  if (options.appKey === undefined || options.appKey === '') {
+    throw new Error('crypto: no keyring: pass `crypto.keys`, `crypto.encryption`, or set APP_KEY');
+  }
   return createKeyring({
     purpose: CONFIG_SECRET_PURPOSE,
-    keys: ordered.map((key) => key.secret),
+    keys: [options.appKey],
     ...(options.kms !== undefined ? { kms: options.kms } : {}),
   });
 }
@@ -109,6 +148,7 @@ export function keyringCodec(keyring: Keyring): SecretCodec {
     reseal(sealed, options = {}) {
       return reseal(keyring, sealed, {
         ...(options.aad !== undefined ? { aad: options.aad } : {}),
+        ...(options.force !== undefined ? { force: options.force } : {}),
       });
     },
   };

@@ -271,16 +271,23 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
       if (config.crypto?.keys?.length) {
         return { status: 'ok', message: `${config.crypto.keys.length} crypto keys configured.` };
       }
+      if (config.crypto?.encryption) {
+        return {
+          status: 'ok',
+          message: 'Secrets use the encryption instance passed in `crypto.encryption`.',
+        };
+      }
       if (process.env.APP_KEY) {
         return {
           status: 'ok',
-          message: 'Secrets use the default `app` key derived from APP_KEY.',
+          message:
+            'Secrets use the app encryption service (`config/encryption.ts`); APP_KEY is the fallback.',
         };
       }
       return {
         status: 'warn',
-        message: 'No APP_KEY and no crypto.keys: writing a secret will fail.',
-        fix: 'Set APP_KEY, or `crypto.keys` in config/config.ts.',
+        message: 'No encryption service, APP_KEY or crypto.keys: writing a secret will fail.',
+        fix: 'Set up `config/encryption.ts` (the default), or pass `crypto.keys` in config/config.ts, or set APP_KEY.',
         docs: `${DOCS}/secrets`,
       };
     },
@@ -312,8 +319,8 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
         return {
           status: 'warn',
           message:
-            'No tenant keyring: APP_KEY is missing, so the app cannot hold the X25519 key sealed values need.',
-          fix: 'Set APP_KEY (the private key is sealed with it at rest), or set tenant.keyPath: false if this app never receives sealed secrets.',
+            'No tenant keyring: no encryption key (config/encryption.ts or APP_KEY), so the app cannot hold the X25519 key sealed values need.',
+          fix: 'Set up `config/encryption.ts` (or APP_KEY) so the private key can be sealed at rest, or set tenant.keyPath: false if this app never receives sealed secrets.',
           docs: `${DOCS}/secrets#sealed-to-an-app`,
         };
       }
@@ -324,7 +331,7 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
       if (status.unreadable > 0) {
         return {
           status: 'error',
-          message: `${status.unreadable} sealed secret(s) could not be opened (missing private key, changed APP_KEY, or a copied key file).`,
+          message: `${status.unreadable} sealed secret(s) could not be opened (missing private key, changed encryption key, or a copied key file).`,
           fix: 'Restore the old private key in the key file, or ask an operator to re-write the entry so it is sealed to the active key.',
           docs: `${DOCS}/secrets#sealed-to-an-app`,
         };

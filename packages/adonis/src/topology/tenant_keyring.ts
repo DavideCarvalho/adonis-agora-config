@@ -103,7 +103,7 @@ export class TenantKeyring {
         })) as unknown as OkpJwk;
       } catch {
         throw new Error(
-          `config: cannot open the tenant private key "${entry.kid}" at ${options.path}; APP_KEY (or crypto.keys) changed, or the file was copied from another app`,
+          `config: cannot open the tenant private key "${entry.kid}" at ${options.path}; the app encryption key changed, or the file was copied from another app`,
         );
       }
       if (

@@ -17,9 +17,10 @@ Tenant auth follows the Agora topology spec: `verifyTenant` top level with the t
 `urn:agora:config` resource, a `partition` claim and `config:read` / `config:secrets:read`
 capabilities. With authkit it is `authkitTenantVerifier` + `authkitTenantToken` from
 `@adonis-agora/authkit-client` (optional, lazy); without it, `sharedSecretVerifier` + the secret in
-`tenant.token`. Secrets use the Agora crypto kit (default key `app` from APP_KEY, optional
-`crypto.keys`/`active` rotation, `config:crypto:reseal`, and the `config.crypto` doctor check); a KMS
-key is a `{ id, kms }` entry. A tenant app holds an X25519 key pair (private key sealed at rest,
+`tenant.token`. Secrets use the Agora crypto kit on top of AdonisJS encryption (the app's
+`config/encryption.ts` by default; optional `crypto.keys`/`active` owned by this package,
+`config:crypto:reseal [--all]`, and the `config.crypto` doctor check); `crypto.kms` enables envelope
+encryption. A tenant app holds an X25519 key pair (private key sealed at rest,
 public key registered on first connect); `--sealed`/the console's seal checkbox write `sealTo`
 ciphertext the control plane can never open, and `config:tenant:key --rotate` re-seals on rotation. `tenant.localEnv` keeps a Sail worktree's ports ahead of the server in development.
 
