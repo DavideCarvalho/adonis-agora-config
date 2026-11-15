@@ -1,0 +1,93 @@
+---
+title: Deployment topologies
+description: What runs where — authkit, one config server, two apps.
+icon: Network
+---
+
+Three deployments are supported, with the same vocabulary as the other Agora libs:
+
+| Topology | Owns configuration | Serves tenants | Reads a server |
+| --- | --- | --- | --- |
+| `standalone` | yes, its own scope | no | no |
+| `control-plane` | yes, every app | yes | no |
+| `tenant` | no | no | yes |
+
+## One server, two apps, one authkit
+
+```
+authkit-server          config control plane          apps
+:3333                   :4000                         :3000, :3001
+  │                        │                             │
+  │  JWKS via discovery ◄──┤ verifyTenant                │
+  │                        │                             │
+  │◄────── client_credentials (urn:agora:config) ───────┤
+  │                        │                             │
+  │                        │◄──── GET /_config/v1/config ─┤ boot + ETag
+  │                        │───── SSE event: config ────►│ hot reload
+  │                        │◄──── GET /_config/v1/config ─┤ every 30s (fallback)
+```
+
+**authkit-server** — three service tenants, one per app, each with `resource: urn:agora:config` and
+the scopes it needs (`config:read`, plus `config:secrets:read` only where needed).
+
+**The control plane** — an AdonisJS app with `topology: 'control-plane'`, one database (its own) and the tables from `stores.lucid()`:
+
+```sh
+CONFIG_DB_* …          # its database connection
+APP_KEY=…              # the secrets key
+AUTHKIT_ISSUER=…       # only the verifier needs it
+```
+
+**Each app** — an AdonisJS app with `topology: 'tenant'`, its own snapshot directory, and nothing
+else:
+
+```sh
+CONFIG_URL=https://config.example.com/_config
+CONFIG_APP=streaming
+AUTHKIT_ISSUER=…
+AUTHKIT_CLIENT_ID=…
+AUTHKIT_CLIENT_SECRET=…
+```
+
+The app never reads authkit-server's tables, never calls the control plane for each request, and never
+needs the control plane to be up to boot: the snapshot covers an outage. Revoking the authkit client
+cuts the app off at its next token refresh (and closes its stream).
+
+## Boot order
+
+1. The process starts.
+2. `bin/server.ts` runs `bootstrapConfig()`: it finds the token endpoint through discovery, gets a
+   token, fetches the document, writes the snapshot, and fills unset environment variables.
+3. `#start/env` and `config/*.ts` load with those values.
+4. The provider boots, reuses the bootstrap client, and subscribes to the stream.
+5. The server accepts requests.
+
+Step 2 is optional; without it steps 3 and 4 swap, and `config/*.ts` keep their local values.
+
+## Several replicas
+
+- **Writes** are one transaction per version; a unique `(app, environment, label, version)` makes two
+  concurrent writers produce two ordered versions instead of losing one.
+- **Streams** are in-process: a write on replica A notifies A's streams immediately. A stream on
+  replica B polls every 15 seconds and catches up on its own, and every tenant also polls at its own
+  interval. No Redis or pub/sub is required.
+- **Snapshots** are per process/pod, on local disk. Mount a writable directory or accept an empty
+  snapshot after a reschedule (the server answers at boot).
+
+## PgBouncer and schemas
+
+Every query names its schema (`schema: 'agora'`), so nothing depends on `search_path` and the lib is
+safe behind PgBouncer in transaction mode. The boot-time `CREATE TABLE IF NOT EXISTS` is idempotent;
+turn it off (`autoCreateSchema: false`) when migrations own the tables.
+
+## Rolling out a change
+
+A key marked `reloadable` applies on every tenant within one poll/stream cycle. A boot-time key
+(the database host, an encryption key, a queue name) is written to the store and applied at the next
+deploy — `config.status()` names it as "restart required". That is the whole
+contract: nothing silently half-applies.
+
+## What is not shared
+
+- A tenant has no store: it cannot be edited locally, and a local edit is not a thing to reconcile.
+- The control plane is one app. Run one, plus replicas of the same code.

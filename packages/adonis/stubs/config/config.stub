@@ -1,0 +1,23 @@
+import env from '#start/env'
+import { defineConfig } from '@adonis-agora/config'
+
+/**
+ * This app reads its configuration from the Agora config server.
+ *
+ * The values reach `config/*.ts` only through the bootstrap entry in `bin/server.ts`
+ * (`import { bootstrapConfig } from '@adonis-agora/config/bootstrap'`), because config files load
+ * before any provider boots. Without it, values arrive at boot for controllers and services.
+ */
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),
+    partition: env.get('CONFIG_APP'),
+    // With authkit: authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' })
+    token: env.get('CONFIG_TOKEN'),
+    environment: env.get('NODE_ENV'),
+    snapshotPath: 'storage/config/snapshot.json',
+    // On outside production: a Sail worktree's ports in .env.local win over the server's.
+    localEnv: env.get('NODE_ENV') !== 'production',
+  },
+})

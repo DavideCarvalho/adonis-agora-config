@@ -1,0 +1,142 @@
+---
+title: Authentication
+description: One token contract for every Agora control plane — urn:agora:config, a partition and capabilities.
+icon: KeyRound
+---
+
+A tenant presents a bearer token. The control plane verifies it and derives **the app, the
+environment and the capabilities from the token**, never from the request. This is the same contract
+as `@adonis-agora/durable` and `@adonis-agora/flags`: one authkit *service tenant* client can hold
+several resources.
+
+## With authkit
+
+Register the app in authkit as a service tenant (the `client_credentials` grant) for the resource
+`urn:agora:config`, with the scopes it needs:
+
+```
+resource: urn:agora:config
+scope: config:read
+        config:secrets:read   # only where secret values are needed
+```
+
+The control plane verifies tokens locally against the issuer's JWKS, found through discovery
+(`/.well-known/openid-configuration` → `jwks_uri`). No hard-coded token URL, no call per request.
+
+```ts title="config/config.ts (the server)"
+import { authkitTenantVerifier } from '@adonis-agora/authkit-client'
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'control-plane',
+  // The helper returns exactly this package's TenantVerifier shape.
+  verifyTenant: authkitTenantVerifier({
+    issuer: env.get('AUTHKIT_ISSUER'),
+    resource: 'urn:agora:config',
+  }),
+})
+```
+
+```ts title="config/config.ts (an app)"
+import { authkitTenantToken } from '@adonis-agora/authkit-client'
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),
+    partition: 'streaming',
+    token: authkitTenantToken({
+      issuer: env.get('AUTHKIT_ISSUER'),
+      clientId: env.get('AUTHKIT_CLIENT_ID'),
+      clientSecret: env.get('AUTHKIT_CLIENT_SECRET'),
+      resource: 'urn:agora:config',
+    }),
+  },
+})
+```
+
+Claims the control plane reads:
+
+| Claim | Meaning |
+| --- | --- |
+| `partition` | the app whose configuration the token may read |
+| `environment` (optional) | the environment; default the control plane's |
+| `scope` / `capabilities` | `config:read`, optionally `config:secrets:read` |
+| `exp` | every stream opened with the token closes at expiry |
+
+An app's identity in the token is also what the audit trail records: the actor is the token's `act`
+claim when the call is an RFC 8693 exchange, else its `sub`.
+
+## Without authkit
+
+One shared secret per app. The tenant names its app with `x-config-app`; the secret proves it.
+
+```ts title="config/config.ts (the server)"
+import { verifiers } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'control-plane',
+  verifyTenant: verifiers.sharedSecret({
+    partitions: {
+      streaming: env.get('CONFIG_SECRET_STREAMING'),
+      billing: {
+        secret: env.get('CONFIG_SECRET_BILLING'),
+        environment: 'staging',
+        capabilities: ['config:read', 'config:secrets:read'],
+      },
+    },
+  }),
+})
+```
+
+```ts title="config/config.ts (an app)"
+tenant: { url, partition: 'streaming', token: env.get('CONFIG_SECRET_STREAMING') }
+```
+
+The default capability set is `['config:read']`. A secret is never readable just because the app is
+authenticated.
+
+## Without authkit, with OAuth
+
+Any OIDC provider works. `tokens.clientCredentials` discovers the token endpoint instead of assuming
+`/oauth/token`, caches the token, and refreshes it before expiry:
+
+```ts
+import { tokens } from '@adonis-agora/config'
+
+token: tokens.clientCredentials({
+  issuer: env.get('OIDC_ISSUER'),
+  clientId: env.get('CONFIG_CLIENT_ID'),
+  clientSecret: env.get('CONFIG_CLIENT_SECRET'),
+  resource: 'urn:agora:config',
+  scope: ['config:read', 'config:secrets:read'],
+})
+```
+
+## The verifier: three forms
+
+`verifyTenant` is top level and accepts the same three forms in every Agora lib:
+
+```ts
+// a function
+verifyTenant: async ({ token }) => verifyMyWay(token)
+
+// a class instance (or a class, constructed with no arguments)
+verifyTenant: new MyVerifier()
+
+// a lazy import: keeps the OIDC library out of the module graph when unused
+verifyTenant: () => import('./config_verifier.js')
+```
+
+A lazy module may export the verifier as `default`, `verify` or `tenantVerifier`. The result is
+normalized, so a verifier written for durable (`{ tenant, scope }`) works here unchanged.
+
+## Refusals
+
+| Situation | Answer |
+| --- | --- |
+| no token, or the verifier rejects it | `401 { "error": "unauthorized" }` |
+| the token lacks the capability | `403 { "error": "token lacks the config:read capability" }` |
+| the token expired mid-stream | the stream closes; the tenant reconnects with a fresh token |
+
+Nothing about the refusal says whether the app exists.

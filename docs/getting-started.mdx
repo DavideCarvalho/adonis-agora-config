@@ -1,0 +1,119 @@
+---
+title: Getting started
+description: Install the server and a tenant, and move the first key.
+icon: Rocket
+---
+
+## The server
+
+```sh
+node ace add @adonis-agora/config
+```
+
+```ts title="config/config.ts"
+import env from '#start/env'
+import { defineConfig, stores, verifiers } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'control-plane',
+  verifyTenant: verifiers.sharedSecret({
+    partitions: {
+      streaming: env.get('CONFIG_SECRET_STREAMING'),
+      billing: env.get('CONFIG_SECRET_BILLING'),
+    },
+  }),
+  // Default: the tables in your database, created at boot.
+  store: stores.lucid(),
+  secrets: { key: env.get('APP_KEY') },
+})
+```
+
+The server mounts, under `/_config`:
+
+- `GET /v1/config` — a tenant's document, with `ETag`;
+- `GET /v1/config/stream` — server-sent events on every change;
+- `GET /v1/whoami` — what the presented token is.
+
+Exempt the tenant API from Shield's CSRF check: tenants are servers, they carry no cookie.
+
+```ts title="config/shield.ts (the server)"
+import { configCsrfExceptions } from '@adonis-agora/config'
+
+csrf: { enabled: true, exceptRoutes: (ctx) => configCsrfExceptions(ctx.request.url()) },
+```
+
+## A tenant
+
+```sh
+node ace add @adonis-agora/config
+```
+
+```ts title="config/config.ts (an app)"
+import env from '#start/env'
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),
+    partition: 'streaming',
+    token: env.get('CONFIG_TOKEN'),
+    snapshotPath: 'storage/config/snapshot.json',
+  },
+})
+```
+
+Register the provider in `adonisrc.ts` (the install hook does it):
+
+```ts title="adonisrc.ts"
+providers: [
+  // …
+  () => import('@adonis-agora/config/config_provider'),
+],
+```
+
+## Before the app's config loads
+
+`config/*.ts` files load before any provider boots. To have remote values while they load, run the
+bootstrap phase at the top of `bin/server.ts`, before the Ignitor:
+
+```ts title="bin/server.ts"
+import { bootstrapConfig } from '@adonis-agora/config/bootstrap'
+
+await bootstrapConfig({
+  url: process.env.CONFIG_URL!,
+  partition: process.env.CONFIG_APP!,
+  token: process.env.CONFIG_TOKEN!,
+  snapshotPath: 'storage/config/snapshot.json',
+  env: true,
+})
+```
+
+Only the server URL and the token's credentials come from the environment: the token must be
+obtainable before the app's own configuration exists. The provider reuses the client the bootstrap
+built, so nothing is fetched twice.
+
+## Read a value
+
+```ts
+import config from '@adonis-agora/config/services/main'
+
+config.get('checkout.timeoutMs', 3000) // reloadable: applies without a restart
+config.get('db.host')                 // boot-time: needs a restart
+config.all()                          // every resolved value
+config.status()                       // source, version, staleness
+```
+
+## Write a value
+
+Writes go through the store's `write`, with the actor recorded in the audit trail:
+
+```ts
+import config from '@adonis-agora/config/services/main'
+
+await config.store!.write(
+  { app: 'streaming', environment: 'production', label: 'main' },
+  [{ key: 'checkout.timeoutMs', value: 5000 }],
+  { actor: 'ann@example.com', now: new Date().toISOString(), message: 'tune checkout' },
+)
+```

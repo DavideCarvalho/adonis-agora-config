@@ -1,0 +1,13 @@
+{
+  "title": "Config",
+  "pages": [
+    "index",
+    "getting-started",
+    "central-server",
+    "tenant",
+    "authentication",
+    "secrets",
+    "deployment",
+    "sail"
+  ]
+}
