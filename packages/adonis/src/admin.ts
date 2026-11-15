@@ -18,6 +18,7 @@ import { sealForApp } from './crypto/tenant_keys.js';
 import type { VaultResolver } from './define_config.js';
 import { emitConfig } from './diagnostics.js';
 import type { ConfigStore, VersionSummary } from './store/store.js';
+import type { ConfigTransport } from './transports/types.js';
 
 export interface PageInput {
   page: number;
@@ -63,6 +64,11 @@ export interface ConfigAdminOptions {
    * tenants connected to this process refresh immediately instead of at the next poll.
    */
   onChange?: (scope: ConfigScope, version: number) => void;
+  /**
+   * Broker transport selected on the control plane (`transports.redis`/`durable`). Writes announce
+   * the new version + a masked snapshot; the HTTP API is untouched.
+   */
+  transport?: ConfigTransport;
 }
 
 function compare(a: unknown, b: unknown): number {
@@ -81,12 +87,30 @@ export class ConfigAdmin {
   readonly canRevealSecrets: boolean;
   readonly #vault: VaultResolver | undefined;
   readonly #onChange: ((scope: ConfigScope, version: number) => void) | undefined;
+  readonly #transport: ConfigTransport | undefined;
 
   constructor(options: ConfigAdminOptions) {
     this.store = options.store;
     this.canRevealSecrets = options.canRevealSecrets ?? true;
     this.#vault = options.vault;
     this.#onChange = options.onChange;
+    this.#transport = options.transport;
+  }
+
+  /** Announces a new version on the selected broker; never fails the write. */
+  #announce(
+    scope: ConfigScope,
+    version: number,
+    document: Parameters<typeof maskDocument>[0],
+  ): void {
+    if (!this.#transport?.publish) return;
+    try {
+      void Promise.resolve(
+        this.#transport.publish(scope, version, maskDocument(document, false)),
+      ).catch(() => {});
+    } catch {
+      // A broker outage must not roll back a stored write; tenants poll/SSE as a fallback.
+    }
   }
 
   /** Apps, environments and labels that hold something, for the console's pickers. */
@@ -218,6 +242,7 @@ export class ConfigAdmin {
     });
     if (result.changed) {
       this.#onChange?.(scope, result.document.version);
+      this.#announce(scope, result.document.version, result.document);
       const entry = result.document.entries[key];
       if (entry) {
         emitConfig('entry.set', {
@@ -282,6 +307,7 @@ export class ConfigAdmin {
     });
     if (result.changed) {
       this.#onChange?.(scope, result.document.version);
+      this.#announce(scope, result.document.version, result.document);
       emitConfig('entry.unset', {
         app: result.document.app,
         environment: result.document.environment,
@@ -381,6 +407,7 @@ export class ConfigAdmin {
     });
     if (result.changed) {
       this.#onChange?.(scope, result.document.version);
+      this.#announce(scope, result.document.version, result.document);
       emitConfig('rollback', {
         app: result.document.app,
         environment: result.document.environment,

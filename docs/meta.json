@@ -5,6 +5,7 @@
     "getting-started",
     "central-server",
     "tenant",
+    "transports",
     "authentication",
     "authkit",
     "secrets",

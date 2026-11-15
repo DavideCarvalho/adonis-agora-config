@@ -29,6 +29,7 @@ import {
   type TenantVerifier,
   type VerifiedTenant,
 } from '../topology/verify.js';
+import type { ConfigTransport } from '../transports/types.js';
 
 interface RouterLike {
   get(pattern: string, handler: (ctx: HttpContext) => unknown): { as(name: string): unknown };
@@ -86,6 +87,8 @@ export interface ControlPlaneOptions {
   logger?: { warn(message: string): void; debug?(message: string): void };
   /** Where change notifications come from (the provider shares one with the console). */
   bus?: ChangeBus;
+  /** Broker transport for tenants that watch over redis/durable; the HTTP API is always mounted. */
+  transport?: ConfigTransport;
 }
 
 const presence = new Map<string, TenantPresence>();
@@ -400,6 +403,22 @@ export class ControlPlane {
       });
       if (result.changed) {
         this.bus.publish(scope, result.version);
+        if (this.options.transport?.publish) {
+          const document = await this.options.store.read(scope);
+          if (document) {
+            try {
+              void Promise.resolve(
+                this.options.transport.publish(
+                  scope,
+                  result.version,
+                  maskDocument(document, false),
+                ),
+              ).catch(() => {});
+            } catch {
+              // Broker outage: the write stands; tenants still poll/SSE.
+            }
+          }
+        }
         emitConfig('sealed.reseal', {
           app: scope.app,
           environment: scope.environment,

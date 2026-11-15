@@ -1,0 +1,122 @@
+---
+title: Transports
+description: How a tenant watches its control plane — HTTP by default, or a broker. Browsers always use HTTP.
+icon: Radio
+---
+
+The transport is a **server-to-server** choice: how an app (tenant) hears about a new configuration
+version. The document itself is always fetched over the control plane's HTTP API with the tenant
+token, so a message never carries a value.
+
+:::info Browsers, the console and public endpoints
+The choice applies **only** to app(tenant) ↔ control-plane traffic. Anything a browser calls — the
+console, a frontend, a public endpoint — always talks HTTP. The control plane keeps its HTTP API
+mounted whatever tenant transport is configured, and a fleet can mix tenants on `http` and on a
+broker. A `transports.redis` control plane still serves `/_config/v1/config` and the console.
+:::
+
+Nothing configured means `transports.http()`: conditional GET with an ETag, SSE for notifications,
+and polling as a fallback. That is the behavior of every previous version.
+
+| Driver | Watch | On-demand read | Peer (loaded lazily) |
+| --- | --- | --- | --- |
+| `transports.http({ url?, fetch?, timeoutMs? })` (default) | SSE + poll | `GET /v1/config` | none |
+| `transports.redis({ connection?, prefix?, snapshotTtlSeconds? })` | pub/sub `changed v=N` + masked snapshot key | `GET /v1/config` | `@adonisjs/redis` |
+| `transports.durable({ controlPlane, from? })` | durable `ControlPlane` event | `GET /v1/config` | `@adonis-agora/durable` (the instance you pass) |
+
+## HTTP (default)
+
+```ts title="config/config.ts (tenant)"
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),
+    partition: 'streaming',
+    token: env.get('CONFIG_TOKEN'),
+    // optional, for a proxy / mTLS / crypto envelope / tests:
+    transport: transports.http({ timeoutMs: 5_000, fetch: myFetch }),
+  },
+})
+```
+
+`url` overrides `tenant.url`; `fetch` replaces the global fetch for the config requests.
+
+## Redis
+
+Both sides select the same driver. The control plane publishes a value-free `changed v=N` on a
+per-scope channel and writes a **masked** snapshot key; the tenant subscribes and fetches the
+document over HTTP with its token.
+
+```ts title="config/config.ts (control plane)"
+import { defineConfig, transports } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'control-plane',
+  verifyTenant,
+  transport: transports.redis({ connection: 'main', prefix: 'config' }),
+})
+```
+
+```ts title="config/config.ts (tenant)"
+import { defineConfig, transports } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),
+    partition: 'streaming',
+    token: env.get('CONFIG_TOKEN'),
+    transport: transports.redis({ connection: 'main', prefix: 'config' }),
+  },
+})
+```
+
+`connection` is a `@adonisjs/redis` connection name (`config/redis.ts`); omit it for `main`. The
+channel/key contain the app, environment and label, so two scopes never collide. The snapshot key is
+what lets a tenant boot when the HTTP control plane is unreachable **and** it has no local snapshot;
+it holds the masked document only (never a secret).
+
+## Durable
+
+Pass the durable control plane you already configured (its `controlPlanes.redis(...)` or the engine's)
+to both sides. Config publishes a `config.changed` durable event; durable's own engine ignores event
+types it does not know.
+
+```ts title="config/config.ts (control plane)"
+import { defineConfig, transports } from '@adonis-agora/config'
+
+const transport = transports.durable({ controlPlane })
+
+export default defineConfig({ topology: 'control-plane', verifyTenant, transport })
+```
+
+```ts title="config/config.ts (tenant)"
+const transport = transports.durable({ controlPlane })
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: { url, partition, token, transport },
+})
+```
+
+Durable is the peer for the **watch** channel only; on-demand reads stay HTTP.
+
+## Mixed fleets
+
+A control plane can serve `http` and broker-backed tenants at once:
+
+- the HTTP API and SSE are always mounted — browsers/console and `http` tenants are unaffected;
+- the configured `transport` only adds the broker publish (and the snapshot key for Redis);
+- each tenant picks its own watch transport, so a rollout can migrate one app at a time.
+
+## Security
+
+- The watch message is only a version: `changed v=N`. It never carries a value, a secret or a token.
+- The data read is the same authenticated `GET /v1/config` as before: the tenant sends its token,
+  `verifyTenant` runs on every request, and the partition/capabilities come from the verified token.
+- A shared broker is not a trust boundary; a party that can subscribe learns only that a scope
+  changed, not what it contains.
+- The Redis snapshot is written masked (`config_<...>:snapshot`); secrets are only ever served over
+  HTTPS to a token carrying `config:secrets:read`.
