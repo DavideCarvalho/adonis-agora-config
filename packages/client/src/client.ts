@@ -127,6 +127,7 @@ export class ConfigClient {
   /** What the token is on the server (reachability + token check). Throws on a refusal. */
   async whoami(): Promise<Whoami> {
     const response = await this.#fetch(`${this.url}/v1/whoami`, { headers: await this.#headers() });
+    if (response.status === 401) this.#token.invalidate?.();
     if (!response.ok) throw new Error(`config: whoami answered ${response.status}`);
     return (await response.json()) as Whoami;
   }

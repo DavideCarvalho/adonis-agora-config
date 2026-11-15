@@ -170,7 +170,11 @@ export function authkitToken(options: AuthkitTokenOptions): TenantToken {
   return {
     get: async () => (await load()).get(),
     invalidate: () => {
-      void load().then((token) => token.invalidate?.());
+      void load()
+        .then((token) => token.invalidate?.())
+        .catch(() => {
+          // The next get() reports the failure; invalidating must never throw.
+        });
     },
   };
 }
