@@ -79,6 +79,9 @@ describe('defineConfig', () => {
     expect(() =>
       defineConfig({ topology: 'standalone', app: 'shop', store: stores.memory() }),
     ).not.toThrow();
-    expect(() => defineConfig({ topology: 'standalone' } as never)).toThrow(/`app` is required/);
+    // `app` is optional: the provider falls back to the package.json name (like the other libs).
+    expect(defineConfig({ topology: 'standalone' } as never)).toMatchObject({
+      topology: 'standalone',
+    });
   });
 });

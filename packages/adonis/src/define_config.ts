@@ -65,8 +65,11 @@ interface BaseConfig {
 /** A single app that owns its configuration locally (the console and commands still work). */
 export interface StandaloneConfig extends BaseConfig {
   topology?: 'standalone';
-  /** This app's name (the partition). */
-  app: string;
+  /**
+   * This app's name (the partition). Default: the app's `package.json` name without the scope
+   * (`@acme/shop` → `shop`), like the other Agora libs.
+   */
+  app?: string;
   /** Where the configuration lives. Default `stores.lucid()`. */
   store?: Factory<ConfigStore>;
   crypto?: CryptoOptions;
@@ -207,9 +210,6 @@ export function defineConfig(config: ConfigConfig): ConfigConfig {
   }
   if (config.topology !== 'control-plane' && raw.verifyTenant !== undefined) {
     throw new Error('config: `verifyTenant` only applies to topology "control-plane"');
-  }
-  if ((config.topology ?? 'standalone') === 'standalone' && !('app' in config && config.app)) {
-    throw new Error('config: `app` is required on a standalone app');
   }
   return config;
 }
