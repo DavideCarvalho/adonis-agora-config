@@ -1,5 +1,16 @@
 # @adonis-agora/config
 
+## 0.3.1
+
+### Patch Changes
+
+- [#10](https://github.com/DavideCarvalho/adonis-agora-config/pull/10) [`1e78379`](https://github.com/DavideCarvalho/adonis-agora-config/commit/1e78379767e36d1028093cc3d62fe2dd910e174a) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Declare `"agora": { "versioning": "independent" }` in every published package's `package.json`.
+  Config is 0.x on purpose and does not follow the 1.x Agora train, so `agora:doctor`'s "Agora
+  versions line up" check no longer warns that `@adonis-agora/config` 0.x is installed next to the
+  1.x rc libraries. Metadata only — no runtime or API change.
+- Updated dependencies [[`1e78379`](https://github.com/DavideCarvalho/adonis-agora-config/commit/1e78379767e36d1028093cc3d62fe2dd910e174a)]:
+  - @adonis-agora/config-core@0.1.1
+
 ## 0.3.0
 
 ### Minor Changes
