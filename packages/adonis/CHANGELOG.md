@@ -1,5 +1,15 @@
 # @adonis-agora/config
 
+## 0.3.0
+
+### Minor Changes
+
+- [#9](https://github.com/DavideCarvalho/adonis-agora-config/pull/9) [`bd6f9e2`](https://github.com/DavideCarvalho/adonis-agora-config/commit/bd6f9e298c308f722d1a2a3a80c1b82e643cec83) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Pluggable tenant↔control-plane transports for the **watch** channel: `transports.http` (default,
+  SSE + poll), `transports.redis` (pub/sub `changed v=N` + masked snapshot key) and
+  `transports.durable` (via durable's control plane). The control plane always keeps its HTTP API
+  mounted, so browsers, the console and http tenants are unaffected and a fleet can mix both. Watch
+  messages carry no values; the document is fetched over HTTPS with the tenant token.
+
 ## 0.2.0
 
 ### Minor Changes
