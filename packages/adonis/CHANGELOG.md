@@ -1,5 +1,20 @@
 # @adonis-agora/config
 
+## 0.3.2
+
+### Patch Changes
+
+- [#11](https://github.com/DavideCarvalho/adonis-agora-config/pull/11) [`4d30b52`](https://github.com/DavideCarvalho/adonis-agora-config/commit/4d30b5260c95f2f94529555d020bcb87b5a9e9c8) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Two console fixes:
+  
+  - The console no longer registers `GET <path>` **and** `GET <path>/`. AdonisJS drops the trailing
+    slash when it computes a route pattern, so both were the same route and the HTTP server died at
+    boot with `Duplicate route found`. One route is registered and it still answers the
+    trailing-slash URL (including a custom `console.path`).
+  - A stored `fetch` is now bound to the global object before it is called. `fetch` is a method of
+    `window` in the browser, so calling it as a property of another object (the console's `ConfigApi`,
+    the `ConfigClient` and the tenant client's conditional GET) threw `TypeError: Illegal invocation`
+    and the console rendered an error while the API worked.
+
 ## 0.3.1
 
 ### Patch Changes
