@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: false,
-    include: ['test/unit/**/*.{spec,test}.ts'],
+    include: ['test/unit/**/*.{spec,test}.ts', 'test/integration/**/*.{spec,test}.ts'],
     pool: 'forks',
   },
 });

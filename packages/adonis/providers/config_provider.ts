@@ -383,13 +383,15 @@ export default class ConfigProvider {
     return environment === 'console' || environment === 'repl';
   }
 
+  /**
+   * The config environment. Adonis' runtime environment is `web`/`console`/`repl`/`test`, not the
+   * deployment environment: a control plane booted as `web` must still read `production` (or
+   * `NODE_ENV`), otherwise its scopes and its tenants' scopes never meet.
+   */
   #nodeEnvironment(): string {
     const environment = this.app.getEnvironment();
-    if (environment === 'console' || environment === 'repl') {
-      return process.env.NODE_ENV ?? 'production';
-    }
     if (environment === 'test') return 'test';
-    return environment && environment !== 'unknown' ? environment : 'production';
+    return process.env.NODE_ENV ?? 'production';
   }
 
   async #logger(): Promise<{ info(message: string): void; warn(message: string): void }> {
