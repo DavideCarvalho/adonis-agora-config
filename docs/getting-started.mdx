@@ -106,14 +106,11 @@ config.status()                       // source, version, staleness
 
 ## Write a value
 
-Writes go through the store's `write`, with the actor recorded in the audit trail:
+Through the console at `/_config`, or from a terminal:
 
-```ts
-import config from '@adonis-agora/config/services/main'
-
-await config.store!.write(
-  { app: 'streaming', environment: 'production', label: 'main' },
-  [{ key: 'checkout.timeoutMs', value: 5000 }],
-  { actor: 'ann@example.com', now: new Date().toISOString(), message: 'tune checkout' },
-)
+```sh
+node ace config:entry:set checkout.timeoutMs 5000 --application=streaming --reloadable
+node ace config:entry:list --application=streaming
+node ace config:history --application=streaming
+node ace config:rollback --to=3 --application=streaming --force
 ```

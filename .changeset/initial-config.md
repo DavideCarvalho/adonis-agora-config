@@ -1,6 +1,7 @@
 ---
 '@adonis-agora/config': minor
 '@adonis-agora/config-core': minor
+'@adonis-agora/config-dashboard': minor
 ---
 
 The first release of the Agora config server, Spring Cloud Config style: a control plane that owns
@@ -12,3 +13,8 @@ the keys marked reloadable while reporting the ones that need a restart.
 Tenant auth follows the Agora topology spec: `verifyTenant` top level with the three forms, the
 `urn:agora:config` resource, a `partition` claim and `config:read` / `config:secrets:read`
 capabilities. `tenant.localEnv` keeps a Sail worktree's ports ahead of the server in development.
+
+The console lists and edits entries per app/environment/label, diffs any two versions, rolls back and
+shows who changed what (secrets masked until an audited reveal). The CLI (`config:entry:*`,
+`config:history`, `config:rollback`, `config:env`) and the MCP dev tools use the same admin service,
+and `agora:doctor` checks the server, the token and the snapshot.

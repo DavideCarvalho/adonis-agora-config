@@ -1,5 +1,22 @@
+import { fileURLToPath } from 'node:url';
+import type { HttpContext } from '@adonisjs/core/http';
 import type { ApplicationService } from '@adonisjs/core/types';
+import { ConfigAdmin } from '../src/admin.js';
 import { type SecretCodec, secretCodec } from '../src/crypto/secrets.js';
+import { ConfigConsole } from '../src/dashboard/console.js';
+import {
+  type ConsoleAuthorizeDecision,
+  resolveConsoleAuthorize,
+} from '../src/dashboard/console_authorize.js';
+import {
+  configConsoleSearch,
+  readAgoraConsoles,
+  registerAgoraConsole,
+} from '../src/dashboard/console_switcher.js';
+import {
+  type ResolvedConsoleConfig,
+  resolveConsoleConfig,
+} from '../src/dashboard/define_config.js';
 import {
   type ConfigConfig,
   type ControlPlaneConfig,
@@ -9,6 +26,9 @@ import {
   stores,
   type TenantTopologyConfig,
 } from '../src/define_config.js';
+import { registerConfigDevTools } from '../src/dev_tools.js';
+import { registerDoctorChecks } from '../src/doctor/agora_doctor.js';
+import { agoraDoctorChecks } from '../src/doctor/checks.js';
 import { ControlPlane } from '../src/http/control_plane.js';
 import type { ConfigRuntime } from '../src/runtime.js';
 import { setRuntime } from '../src/services/accessor.js';
@@ -28,18 +48,33 @@ declare module '@adonisjs/core/types' {
   }
 }
 
+/** This console's id in the `'agora.consoles'` registry. */
+export const CONSOLE_ID = 'config';
+
+/** The built console (`dist/assets/spa`), resolved from `dist/providers/config_provider.js`. */
+function spaDirectory(): string {
+  return fileURLToPath(new URL('../assets/spa/', import.meta.url));
+}
+
 /**
  * Builds the config runtime from `config/config.ts` and publishes it as `'agora.config'` and as
- * `services/main`. On a control plane it mounts the tenant API under `/_config/v1`; on a tenant it
- * loads the configuration before the first request and keeps it fresh.
+ * `services/main`.
  *
- * The tenant's values reach `config/*.ts` only through the bootstrap entry (`@adonis-agora/config/bootstrap`
- * in `bin/server.ts`), because config files load before any provider boots. Without it the values
- * arrive at boot and are available to controllers and services, but not to the config files.
+ * - **control plane**: mounts the tenant API under `/_config/v1`, the console (SPA + JSON API)
+ *   under `/_config` and the dev tools; registers the `agora:doctor` checks.
+ * - **tenant**: loads the configuration before the first request, keeps it fresh and emits the
+ *   reload/restart events.
+ * - **standalone**: own scope, console, commands; no tenant API.
+ *
+ * The tenant's values reach `config/*.ts` only through `@adonis-agora/config/bootstrap` in
+ * `bin/server.ts`, because config files load before any provider boots.
  */
 export default class ConfigProvider {
   #runtime: ConfigRuntime | undefined;
   #building: Promise<ConfigRuntime> | undefined;
+  #admin: ConfigAdmin | undefined;
+  #console: ConfigConsole | undefined;
+  #consoleConfig: ResolvedConsoleConfig | undefined;
 
   constructor(protected app: ApplicationService) {}
 
@@ -62,13 +97,9 @@ export default class ConfigProvider {
 
   async #doBuild(): Promise<ConfigRuntime> {
     const config = this.#config();
-    const nodeEnvironment = this.#nodeEnvironment();
-    const environment = config.environment ?? nodeEnvironment;
+    const environment = config.environment ?? this.#nodeEnvironment();
     const logger = await this.#logger();
-
-    if (config.topology === 'tenant') {
-      return this.#tenant(config, environment, logger);
-    }
+    if (config.topology === 'tenant') return this.#tenant(config, environment, logger);
     return this.#server(config, environment, logger);
   }
 
@@ -134,7 +165,7 @@ export default class ConfigProvider {
       client,
       secrets: false,
       localEnv: status.localEnv,
-      get: (key, fallback) => client.get(key, fallback),
+      get: (k, fallback) => client.get(k, fallback),
       all: () => client.values(),
       status: () => client.status(),
     };
@@ -170,6 +201,16 @@ export default class ConfigProvider {
     const store: ConfigStore = await (config.store ?? stores.lucid())(factoryContext);
     await store.setup?.();
 
+    const app = config.topology === 'standalone' ? config.app : '';
+    const consoleConfig = resolveConsoleConfig(config.console, { environment });
+    const admin = new ConfigAdmin({
+      store,
+      canRevealSecrets: consoleConfig.revealSecrets,
+      ...(config.vault ? { vault: config.vault.resolve } : {}),
+    });
+    this.#admin = admin;
+    this.#consoleConfig = consoleConfig;
+
     let controlPlane: ControlPlane | undefined;
     if (config.topology === 'control-plane') {
       const verifyTenant = await resolveTenantVerifier(config.verifyTenant);
@@ -183,9 +224,8 @@ export default class ConfigProvider {
         logger,
       });
     }
-    const app = config.topology === 'standalone' ? config.app : '';
     logger.info(
-      `[@adonis-agora/config] ${config.topology} on ${environment}${config.topology === 'control-plane' ? ` at ${config.prefix ?? '/_config'}/v1` : ''}`,
+      `[@adonis-agora/config] ${config.topology ?? 'standalone'} on ${environment}${controlPlane ? ` at ${config.topology === 'control-plane' ? (config.prefix ?? '/_config') : ''}/v1` : ''}`,
     );
     const runtime: ConfigRuntime = {
       topology: config.topology ?? 'standalone',
@@ -245,8 +285,118 @@ export default class ConfigProvider {
     }
   }
 
+  /** The console's resolved gate, also used by the switcher and the dev tools. */
+  async #authorize(ctx: HttpContext): Promise<ConsoleAuthorizeDecision> {
+    const configured = this.#consoleConfig?.authorize;
+    if (configured) return resolveConsoleAuthorize(configured)(ctx);
+    return this.app.inProduction
+      ? { allowed: false, status: 403, reason: 'forbidden' }
+      : { allowed: true };
+  }
+
+  async #mountConsole(logger: {
+    warn(message: string): void;
+    info(message: string): void;
+  }): Promise<void> {
+    const config = this.#consoleConfig;
+    const admin = this.#admin;
+    if (!config || !admin || !config.enabled) return;
+    const registry = await readAgoraConsoles(this.app.container);
+    const environment = this.#runtime?.environment ?? 'production';
+    const console = new ConfigConsole({
+      admin,
+      config,
+      spaDir: spaDirectory(),
+      environment,
+      ...(this.#runtime?.app ? { defaultApp: this.#runtime.app } : {}),
+      inProduction: this.app.inProduction,
+      ...(registry ? { registry } : {}),
+      secrets: this.#runtime?.secrets ?? false,
+      topology: this.#runtime?.topology === 'standalone' ? 'standalone' : 'control-plane',
+      logger,
+    });
+    this.#console = console;
+    if (!config.authorize) {
+      logger.warn(
+        '[@adonis-agora/config] the console has no `authorize`: it is open outside production and denies every request in production. Set `console.authorize` in config/config.ts.',
+      );
+    }
+    await this.app.booted(async () => {
+      const router = await this.app.container.make('router');
+      console.register(router as never);
+    });
+    logger.info(
+      `[@adonis-agora/config] console at ${config.path === '' ? '/' : config.path} (API ${config.api})`,
+    );
+  }
+
+  async #registerConsole(logger: { warn(message: string): void }): Promise<void> {
+    const config = this.#consoleConfig;
+    if (!config?.enabled) return;
+    const path = config.path === '' ? '/' : config.path;
+    const defaults = {
+      app: this.#runtime?.app ?? '',
+      environment: this.#runtime?.environment ?? 'production',
+      label: 'main',
+    };
+    await registerAgoraConsole(
+      this.app.container,
+      {
+        id: CONSOLE_ID,
+        title: 'Configuration',
+        package: '@adonis-agora/config',
+        icon: 'generic',
+        path,
+        order: 65,
+        authorize: async (ctx) => {
+          const decision = await this.#authorize(ctx);
+          if (decision.allowed) return { allowed: true };
+          if (decision.status === 302) {
+            return { allowed: false, redirectTo: decision.redirectTo };
+          }
+          return { allowed: false, reason: decision.reason };
+        },
+        search: configConsoleSearch(
+          async () => ({
+            keys: (scope) =>
+              this.#admin!.keys({
+                app: scope.app || defaults.app,
+                environment: scope.environment || defaults.environment,
+                label: scope.label || defaults.label,
+              }),
+          }),
+          config.path,
+        ),
+      },
+      logger,
+    );
+  }
+
+  async #registerDevTools(): Promise<void> {
+    const admin = this.#admin;
+    if (!admin) return;
+    await registerConfigDevTools(this.app.container, {
+      admin,
+      authorize: async (ctx) => {
+        const decision = await this.#authorize(ctx);
+        if (decision.allowed) return { allowed: true };
+        if (decision.status === 302) {
+          return { allowed: false, reason: 'forbidden', redirectTo: decision.redirectTo };
+        }
+        return { allowed: false, reason: decision.reason };
+      },
+    });
+  }
+
   async boot(): Promise<void> {
     const runtime = await this.#build();
+    const logger = await this.#logger();
+    await registerDoctorChecks(this.app.container, agoraDoctorChecks);
+    if (runtime.topology !== 'tenant') {
+      await this.#registerConsole(logger);
+      await this.#mountConsole(logger);
+      await this.#registerDevTools();
+    }
     await this.app.booted(async () => {
       if (!runtime.controlPlane) return;
       const router = await this.app.container.make('router');
@@ -259,5 +409,8 @@ export default class ConfigProvider {
     setRuntime(undefined);
     this.#runtime = undefined;
     this.#building = undefined;
+    this.#admin = undefined;
+    this.#console = undefined;
+    this.#consoleConfig = undefined;
   }
 }

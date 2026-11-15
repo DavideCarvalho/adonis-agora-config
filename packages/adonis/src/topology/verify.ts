@@ -126,9 +126,19 @@ export async function resolveTenantVerifier(input: TenantVerifierInput): Promise
       const instance = new (input as new () => TenantVerifierObject)();
       return (request) => instance.verify(request);
     }
-    // A lazy import factory takes no arguments.
+    // A lazy import factory takes no arguments — but so may a verifier. Call it once and tell the
+    // two apart by what comes back: a module has `default`/`verify`/`tenantVerifier`, a verifier
+    // answers with a verified tenant or null.
     if (input.length === 0) {
-      return fromModule(await (input as () => Promise<TenantVerifierModule>)());
+      const produced = await (input as () => Promise<unknown>)();
+      if (
+        produced !== null &&
+        typeof produced === 'object' &&
+        ('default' in produced || 'verify' in produced || 'tenantVerifier' in produced)
+      ) {
+        return fromModule(produced as TenantVerifierModule);
+      }
+      return (request) => (input as TenantVerifier)(request);
     }
     return (request) => (input as TenantVerifier)(request);
   }

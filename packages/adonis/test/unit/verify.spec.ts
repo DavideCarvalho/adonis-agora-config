@@ -46,6 +46,16 @@ describe('resolveTenantVerifier', () => {
     expect(await constructed({ token: 'good' })).toMatchObject({ partition: 'instance' });
   });
 
+  it('accepts a zero-argument verifier as well as a lazy import', async () => {
+    const zero = await resolveTenantVerifier((async () => ({
+      partition: 'zero',
+      capabilities: ['config:read'],
+    })) as never);
+    expect(await zero({})).toMatchObject({ partition: 'zero' });
+    const closed = await resolveTenantVerifier((async () => null) as never);
+    expect(await closed({})).toBeNull();
+  });
+
   it('accepts a lazy import (default, named and tenantVerifier)', async () => {
     const fromDefault = await resolveTenantVerifier(() =>
       Promise.resolve({ default: verifier as never }),
@@ -65,9 +75,9 @@ describe('resolveTenantVerifier', () => {
 
   it('refuses an unusable verifier loudly', async () => {
     await expect(resolveTenantVerifier(undefined as never)).rejects.toThrow(/must be a function/);
-    await expect(resolveTenantVerifier((() => Promise.resolve({})) as never)).rejects.toThrow(
-      /exports no verifier/,
-    );
+    await expect(
+      resolveTenantVerifier((() => Promise.resolve({ default: undefined })) as never),
+    ).rejects.toThrow(/exports no verifier/);
   });
 });
 

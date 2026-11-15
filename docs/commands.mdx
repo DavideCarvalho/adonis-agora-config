@@ -1,0 +1,69 @@
+---
+title: CLI
+description: Everything the console does from node ace — with --json and --force.
+icon: Terminal
+---
+
+The commands call the same `ConfigAdmin` service the console and the MCP tools use: same validation,
+same masking, same versions, and `cli:<os user>` as the audit actor.
+
+```sh
+node ace config:entry:list --application=streaming --environment=production
+node ace config:entry:get db.host --application=streaming
+node ace config:entry:set checkout.timeoutMs 3000 --reloadable --message="tune checkout"
+node ace config:entry:unset legacy.flag --force
+node ace config:history --application=streaming
+node ace config:version:show 4 --application=streaming
+node ace config:diff --from=3 --to=4 --application=streaming
+node ace config:rollback --to=4 --force --message="revert the pool change"
+node ace config:audit --application=streaming --action=reveal
+node ace config:env --application=streaming
+```
+
+| Command | |
+| --- | --- |
+| `config:entry:list` | entries, with `--search`, `--secret`, `--reloadable`, `--page`, `--size` |
+| `config:entry:get <key>` | one entry; `--secrets` reveals a secret (audited) |
+| `config:entry:set <key> <value>` | JSON or text; `--vault`, `--secret`, `--reloadable`, `--description`, `--message`, `--string` |
+| `config:entry:unset <key>` | removes it; asks unless `--force` |
+| `config:history` | versions, newest first (`--oldest`, `--page`, `--size`) |
+| `config:version:show <version>` | one version exactly as it was (`--secrets`) |
+| `config:diff --from=<v> --to=<v>` | added/removed/changed keys between two versions (`--secrets`) |
+| `config:audit` | the trail, filtered by `--key` / `--action` |
+| `config:rollback --to=<version>` | writes a new version from a past one; asks unless `--force` |
+| `config:env` | the resolved values as `KEY=value`, for `eval`/pipes; `--secrets`, `--prefix` |
+
+Every command takes `--application`, `--environment` and `--label` (defaults: the app in the
+runtime, the process environment, `main`) and `--json`. A failure sets exit code 1 and writes the
+reason to stderr.
+
+## Values
+
+The value argument is read like the console reads the editor: valid JSON is stored as JSON
+(`3000`, `true`, `{"a":1}`), anything else as a string. `--string` keeps even JSON-looking text a
+string. A value that will be a secret is encrypted at rest:
+
+```sh
+node ace config:entry:set stripe.secret sk_live_… --secret
+node ace config:entry:set stripe.secret --vault='vault://aws/prod/streaming#stripe'
+```
+
+## Scripting
+
+`--json` prints one object to stdout, nothing else:
+
+```sh
+node ace config:entry:list --application=streaming --json | jq '.data[].key'
+node ace config:history --application=streaming --json | jq '.meta.total'
+```
+
+`config:env` mirrors `sail:info --env`, so a shell can export the whole scope:
+
+```sh
+eval "$(node ace config:env --application=streaming)"
+```
+
+## In a worktree
+
+`config:env` reads the same values the app would (`tenant.localEnv` included on a tenant), so a Sail
+worktree prints its own ports rather than the server's. See [Sail](/docs/config/sail).

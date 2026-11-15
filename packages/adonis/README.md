@@ -18,8 +18,11 @@ export default defineConfig({
 })
 ```
 
-Read the docs at [`docs/`](./docs): the control plane, the tenant, authentication, secrets,
-deployment topologies and Sail.
+It also ships the console (`/_config`), the `config:entry:*`, `config:history`, `config:rollback`
+and `config:env` commands, the MCP dev tools and the `agora:doctor` checks.
+
+Read the docs at [`docs/`](./docs): the control plane, the tenant, authentication, secrets, the
+console, the CLI, MCP tools, deployment topologies and Sail.
 
 Part of the Agora ecosystem. Requires `@adonisjs/core` 7; `@adonisjs/lucid` is optional (the
 in-memory store needs nothing).

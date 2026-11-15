@@ -17,6 +17,7 @@ export async function configure(command: Configure) {
   // biome-ignore lint/suspicious/noExplicitAny: `updateRcFile` types its callback loosely.
   await codemods.updateRcFile((rcFile: any) => {
     rcFile.addProvider('@adonis-agora/config/config_provider');
+    rcFile.addCommand('@adonis-agora/config/commands');
   });
 
   const stubs = stubsRoot();

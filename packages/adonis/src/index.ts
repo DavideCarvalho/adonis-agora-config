@@ -20,8 +20,33 @@ export {
   type ScopeSummary,
   unflattenObject,
 } from '@adonis-agora/config-core';
+export {
+  ConfigAdmin,
+  type EntryFilters,
+  type EntryRow,
+  type EntrySort,
+  type SetEntryOptions,
+} from './admin.js';
 export { type BootstrapOptions, type BootstrapResult, bootstrapConfig } from './bootstrap.js';
 export { deriveKey, type SecretCodec, secretCodec } from './crypto/secrets.js';
+export { type ConsoleActor, consoleActor } from './dashboard/actor.js';
+export {
+  anyAuthorize,
+  authorizeByToken,
+  type ConsoleAuthorize,
+  type ConsoleAuthorizeDecision,
+  type ConsoleAuthorizeResult,
+  type ConsoleAuthorizer,
+  type ConsoleAuthorizerClass,
+  normalizeConsoleAuthorizeResult,
+  resolveConsoleAuthorize,
+} from './dashboard/console_authorize.js';
+export {
+  type ConfigConsoleConfig,
+  consolePath,
+  type ResolvedConsoleConfig,
+  resolveConsoleConfig,
+} from './dashboard/define_config.js';
 export {
   type ConfigConfig,
   type ControlPlaneConfig,
@@ -35,6 +60,8 @@ export {
   type VaultConfig,
   type VaultResolver,
 } from './define_config.js';
+export { configDevTools, registerConfigDevTools } from './dev_tools.js';
+export { agoraDoctorChecks } from './doctor/checks.js';
 export {
   ChangeBus,
   ControlPlane,

@@ -40,7 +40,8 @@ export function serve(
         },
         send(body: unknown) {
           res.writeHead(status, headers);
-          res.end(typeof body === 'string' ? body : JSON.stringify(body));
+          if (Buffer.isBuffer(body) || body instanceof Uint8Array) res.end(body);
+          else res.end(typeof body === 'string' ? body : JSON.stringify(body));
         },
         json(body: unknown) {
           headers['content-type'] = 'application/json';

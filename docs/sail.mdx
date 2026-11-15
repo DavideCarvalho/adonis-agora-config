@@ -61,8 +61,8 @@ config.get('db.port')   // 5789 in this worktree, whatever the server says
 config.status()         // where the values came from, and whether localEnv is on
 ```
 
-`node ace sail:info --env` and the resolved values agree on every key Sail owns. A key only the config
-server has simply keeps the server's value.
+`node ace sail:info --env` and `node ace config:env --application=<app>` agree on every key Sail
+owns. A key only the config server has simply keeps the server's value.
 
 ## Tests
 

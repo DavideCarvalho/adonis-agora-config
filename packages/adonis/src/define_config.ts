@@ -1,6 +1,7 @@
 import type { ConfigValue, VaultReference } from '@adonis-agora/config-core';
 import type { ApplicationService } from '@adonisjs/core/types';
 import type { SecretCodec } from './crypto/secrets.js';
+import type { ConfigConsoleConfig } from './dashboard/define_config.js';
 import type { SqlDatabase } from './sql.js';
 import { LucidStore } from './store/lucid_store.js';
 import { MemoryStore } from './store/memory_store.js';
@@ -79,6 +80,8 @@ export interface StandaloneConfig extends BaseConfig {
   autoCreateSchema?: boolean;
   /** Postgres: keep every table in this schema (created separately). */
   schema?: string;
+  /** Mount the console (the SPA + its JSON API). Default on. */
+  console?: ConfigConsoleConfig | false;
 }
 
 /** The server every app connects to. */
@@ -104,6 +107,8 @@ export interface ControlPlaneConfig extends BaseConfig {
   autoCreateSchema?: boolean;
   /** Postgres: keep every table in this schema (created separately). */
   schema?: string;
+  /** Mount the console (the SPA + its JSON API). Default on. */
+  console?: ConfigConsoleConfig | false;
 }
 
 /** An app that reads its configuration from a control plane. */
@@ -155,6 +160,7 @@ export interface TenantTopologyConfig extends BaseConfig {
   vault?: never;
   autoCreateSchema?: never;
   schema?: never;
+  console?: never;
 }
 
 export type ConfigConfig = StandaloneConfig | ControlPlaneConfig | TenantTopologyConfig;

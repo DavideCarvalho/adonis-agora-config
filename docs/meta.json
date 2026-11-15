@@ -7,6 +7,9 @@
     "tenant",
     "authentication",
     "secrets",
+    "console",
+    "commands",
+    "mcp",
     "deployment",
     "sail"
   ]

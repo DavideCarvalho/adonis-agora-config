@@ -30,7 +30,7 @@ authkit-server          config control plane          apps
 **authkit-server** — three service tenants, one per app, each with `resource: urn:agora:config` and
 the scopes it needs (`config:read`, plus `config:secrets:read` only where needed).
 
-**The control plane** — an AdonisJS app with `topology: 'control-plane'`, one database (its own) and the tables from `stores.lucid()`:
+**The control plane** — an AdonisJS app with `topology: 'control-plane'`, one database (its own), the console and the tables from `stores.lucid()`:
 
 ```sh
 CONFIG_DB_* …          # its database connection
