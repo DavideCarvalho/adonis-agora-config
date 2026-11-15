@@ -139,7 +139,11 @@ export default class ConfigProvider {
         localEnv: config.tenant.localEnv ?? this.#nodeEnvironment() !== 'production',
         logger,
       });
-    if (!bootstrapped) await client.start();
+    if (!bootstrapped) {
+      // Ace commands must not open a stream or start polling; they only need the values once.
+      if (this.#isConsole()) await client.load();
+      else await client.start();
+    }
     client.onChange((change) => {
       if (change.reloadable.length > 0) {
         logger.info(
@@ -265,8 +269,17 @@ export default class ConfigProvider {
     }
   }
 
+  /** Ace (and the REPL) run in a short-lived process: no polling, no SSE. */
+  #isConsole(): boolean {
+    const environment = this.app.getEnvironment();
+    return environment === 'console' || environment === 'repl';
+  }
+
   #nodeEnvironment(): string {
-    const environment = this.app.nodeEnvironment;
+    const environment = this.app.getEnvironment();
+    if (environment === 'console' || environment === 'repl') {
+      return process.env.NODE_ENV ?? 'production';
+    }
     if (environment === 'test') return 'test';
     return environment && environment !== 'unknown' ? environment : 'production';
   }
@@ -409,7 +422,8 @@ export default class ConfigProvider {
     if (runtime.topology !== 'tenant') {
       await this.#registerConsole(logger);
       await this.#mountConsole(logger);
-      await this.#registerDevTools();
+      // A console that is disabled exposes no dev tools either (the hub rule every Agora lib follows).
+      if (this.#consoleConfig?.enabled) await this.#registerDevTools();
     }
     await this.app.booted(async () => {
       if (!runtime.controlPlane) return;

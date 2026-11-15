@@ -68,6 +68,22 @@ function client(options: Parameters<typeof createTenantClient>[0]): TenantClient
 }
 
 describe('tenant client', () => {
+  it('loads once without starting timers (the ace commands path)', async () => {
+    const store = memoryConfig();
+    await seedConfig(store, testScope, [['db.host', 'localhost']]);
+    const { url } = await startServer(store);
+    const tenant = client({
+      url,
+      partition: 'shop',
+      token: 'shop-secret',
+      stream: true,
+      intervalMs: 60_000,
+    });
+    await tenant.load();
+    expect(tenant.get('db.host')).toBe('localhost');
+    expect(tenant.status()).toMatchObject({ source: 'remote', streaming: false });
+  });
+
   it('loads the document at start, exposes values and snapshots it', async () => {
     const store = memoryConfig();
     await seedConfig(store, testScope, [
@@ -130,8 +146,10 @@ describe('tenant client', () => {
 
     expect(tenant.get('checkout.timeoutMs')).toBe(5000);
     expect(tenant.get('checkout.enabled')).toBe(true);
-    // Boot-time key: the app keeps what it booted with.
+    // Boot-time key: the app keeps what it booted with, but the last document has the new value
+    // (this is what config:pull writes for the next boot).
     expect(tenant.get('db.host')).toBe('localhost');
+    expect(tenant.latestValues()['db.host']).toBe('db.internal');
     expect(changes.at(-1)).toMatchObject({
       reloadable: expect.arrayContaining(['checkout.timeoutMs', 'checkout.enabled']),
       restartRequired: ['db.host'],

@@ -133,6 +133,8 @@ export class TenantClient {
   readonly #listeners = new Set<(change: ConfigChangeSet) => void>();
   #boot: Record<string, ConfigEntryView> | null = null;
   #live: Record<string, ConfigEntryView> = {};
+  /** The last document received (or read from the snapshot), before boot/live splitting. */
+  #document: ConfigDocumentView | null = null;
   #version = 0;
   #fingerprint = '';
   #loadedAt: Date | null = null;
@@ -184,11 +186,11 @@ export class TenantClient {
     return `Bearer ${await this.#token.get()}`;
   }
 
-  /** Loads the configuration, from the snapshot when the control plane is unreachable. */
-  async start(): Promise<void> {
-    if (this.#started) return;
-    this.#started = true;
-    this.#stopped = false;
+  /**
+   * Loads the configuration once, from the snapshot when the control plane is unreachable. No
+   * timers, no stream: `node ace` commands use this so they never start background work.
+   */
+  async load(): Promise<void> {
     const loaded = await this.refresh();
     if (!loaded && this.#boot === null) {
       await this.#loadSnapshot();
@@ -205,6 +207,14 @@ export class TenantClient {
       this.#boot = {};
       this.#live = {};
     }
+  }
+
+  /** Loads the configuration and keeps it fresh (stream + polling). */
+  async start(): Promise<void> {
+    if (this.#started) return;
+    this.#started = true;
+    this.#stopped = false;
+    await this.load();
     const streaming = this.options.stream !== false;
     const interval = this.options.intervalMs ?? (streaming ? 30_000 : 5_000);
     this.#timer = setInterval(() => void this.refresh(), interval);
@@ -226,6 +236,19 @@ export class TenantClient {
   /** The whole current document (reloadable and boot values alike), as nested JSON. */
   nested(): Record<string, ConfigValue> {
     return unflattenObject(this.values());
+  }
+
+  /**
+   * The values of the LAST document received, before the boot/reloadable split and without local
+   * env overrides. `config:pull` uses this: it wants the server's latest, not what this process
+   * applied at boot.
+   */
+  latestValues(): Record<string, ConfigValue> {
+    const out: Record<string, ConfigValue> = {};
+    for (const [key, entry] of Object.entries(this.#document?.entries ?? {})) {
+      if (entry.value !== undefined) out[key] = entry.value;
+    }
+    return out;
   }
 
   /** One value. Boot-time keys keep their boot value until the process restarts. */
@@ -350,6 +373,7 @@ export class TenantClient {
   }
 
   async #apply(document: ConfigDocumentView): Promise<boolean> {
+    this.#document = document;
     const first = this.#boot === null;
     const previous = this.entries();
     const masked = document;
@@ -453,6 +477,7 @@ export class TenantClient {
     try {
       const [text, info] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
       const document = JSON.parse(text) as ConfigDocumentView;
+      this.#document = document;
       this.#boot = { ...document.entries };
       this.#live = {};
       this.#version = document.version;

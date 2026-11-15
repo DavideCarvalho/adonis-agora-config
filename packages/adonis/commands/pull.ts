@@ -163,7 +163,13 @@ export default class ConfigPull extends BaseCommand {
       runtime.app === scope.app &&
       runtime.environment === scope.environment;
     if (sameAsTenant && runtime) {
-      return { values: runtime.all(), source: 'tenant' };
+      // The last document the tenant received, not the values it applied at boot: a boot-time key
+      // changed on the server must still be pulled into .env.local for the next boot.
+      const latest = runtime.client?.latestValues();
+      return {
+        values: latest && Object.keys(latest).length > 0 ? latest : runtime.all(),
+        source: 'tenant',
+      };
     }
     const localStore =
       runtime?.store && this.url === undefined && this.remote !== true ? runtime.store : undefined;
