@@ -15,7 +15,7 @@ export interface ConfigRuntime {
   controlPlane?: ControlPlane;
   /** Tenant only. */
   client?: TenantClient;
-  /** Whether a secrets key is configured (secrets can be stored and read). */
+  /** Whether an encryption codec is configured (secrets can be stored and read). */
   secrets: boolean;
   /** `true` when the tenant lets local env win (`tenant.localEnv`, on outside production). */
   localEnv: boolean;

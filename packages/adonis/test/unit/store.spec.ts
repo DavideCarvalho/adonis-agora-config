@@ -38,7 +38,7 @@ describe('DocumentSealer', () => {
         updatedAt: at,
         updatedBy: 'tester',
       }),
-    ).toThrow(/no secrets key/);
+    ).toThrow(/no encryption codec/);
   });
 });
 

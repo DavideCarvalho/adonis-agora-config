@@ -7,7 +7,7 @@
 
 The first release of the Agora config server, Spring Cloud Config style: a control plane that owns
 every app's configuration per app, environment and label, with immutable versions, history, audit,
-secrets encrypted at rest (or resolved from a vault) and an ETag + SSE tenant API; and a tenant that
+secrets encrypted at rest by the app's AdonisJS encryption service (or resolved from a vault) and an ETag + SSE tenant API; and a tenant that
 fetches before the app's config loads, boots from a disk snapshot during an outage, and hot-reloads
 the keys marked reloadable while reporting the ones that need a restart.
 
@@ -15,7 +15,8 @@ Tenant auth follows the Agora topology spec: `verifyTenant` top level with the t
 `urn:agora:config` resource, a `partition` claim and `config:read` / `config:secrets:read`
 capabilities. With authkit it is `authkitTenantVerifier` + `authkitTenantToken` from
 `@adonis-agora/authkit-client` (optional, lazy); without it, `sharedSecretVerifier` + the secret in
-`tenant.token`. `tenant.localEnv` keeps a Sail worktree's ports ahead of the server in development.
+`tenant.token`. Secrets use the app encryption service (`config/encryption.ts`), bound to the
+`agora-config` purpose; `secrets.codec` swaps in a KMS-backed codec. `tenant.localEnv` keeps a Sail worktree's ports ahead of the server in development.
 
 The console lists and edits entries per app/environment/label, diffs any two versions, rolls back and
 shows who changed what (secrets masked until an audited reveal). The CLI (`config:entry:*`,

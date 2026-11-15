@@ -175,22 +175,36 @@ describe('config doctor checks', () => {
     });
   });
 
-  it('warns when a control plane has no secrets key', async () => {
+  it('reports the app encryption service or a custom codec, and warns without either', async () => {
     const root = await workspace();
-    delete process.env.APP_KEY;
     const config = {
       topology: 'control-plane',
       verifyTenant: async () => null,
     } as ConfigConfig;
-    expect(await check('config.secrets-key').run(fakeApp(config, root))).toMatchObject({
+    const withEncryption = {
+      config: { get: (key: string) => (key === 'config' ? config : undefined) },
+      makePath: (path = '') => join(root, path),
+      container: { hasBinding: (binding: string) => binding === 'encryption' },
+    } as unknown as ApplicationService;
+    expect(await check('config.secrets-key').run(withEncryption)).toMatchObject({ status: 'ok' });
+
+    const without = {
+      config: { get: (key: string) => (key === 'config' ? config : undefined) },
+      makePath: (path = '') => join(root, path),
+      container: { hasBinding: () => false },
+    } as unknown as ApplicationService;
+    expect(await check('config.secrets-key').run(without)).toMatchObject({
       status: 'warn',
+      fix: expect.stringContaining('config/encryption.ts'),
     });
-    const withKey = {
+
+    const custom = {
       ...config,
-      secrets: { key: 'k' },
+      secrets: { codec: { seal: () => '', open: () => null, owns: () => false } },
     } as ConfigConfig;
-    expect(await check('config.secrets-key').run(fakeApp(withKey, root))).toMatchObject({
+    expect(await check('config.secrets-key').run(fakeApp(custom, root))).toMatchObject({
       status: 'ok',
+      message: expect.stringContaining('custom'),
     });
   });
 });

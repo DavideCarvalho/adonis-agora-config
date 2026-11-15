@@ -2,7 +2,8 @@ import { fileURLToPath } from 'node:url';
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ApplicationService } from '@adonisjs/core/types';
 import { ConfigAdmin } from '../src/admin.js';
-import { type SecretCodec, secretCodec } from '../src/crypto/secrets.js';
+import { adonisSecretCodec, type EncryptionLike } from '../src/crypto/adonis.js';
+import type { SecretCodec } from '../src/crypto/secrets.js';
 import { ConfigConsole } from '../src/dashboard/console.js';
 import {
   type ConsoleAuthorizeDecision,
@@ -180,7 +181,7 @@ export default class ConfigProvider {
     logger: { info(message: string): void; warn(message: string): void },
   ): Promise<ConfigRuntime> {
     const container = this.app.container;
-    const codec = this.#secretCodec(config.secrets);
+    const codec = await this.#secretCodec(config.secrets);
     const autoCreateSchema = config.autoCreateSchema ?? true;
     const factoryContext: FactoryContext = {
       app: this.app,
@@ -249,11 +250,19 @@ export default class ConfigProvider {
     return runtime;
   }
 
-  #secretCodec(secrets: SecretsConfig | undefined): SecretCodec | undefined {
+  /**
+   * Secrets use the app's encryption service (`config/encryption.ts`): its driver, its key list and
+   * rotation, with a purpose that scopes the ciphertext to this package. A custom codec (KMS) wins.
+   * Without an encryption binding there is no codec: writing a secret fails loudly.
+   */
+  async #secretCodec(secrets: SecretsConfig | undefined): Promise<SecretCodec | undefined> {
     if (secrets?.codec) return secrets.codec;
-    const configured =
-      typeof secrets?.key === 'function' ? secrets.key() : (secrets?.key ?? process.env.APP_KEY);
-    return configured ? secretCodec(configured) : undefined;
+    try {
+      const encryption = (await this.app.container.make('encryption')) as EncryptionLike;
+      return adonisSecretCodec(encryption);
+    } catch {
+      return undefined;
+    }
   }
 
   #nodeEnvironment(): string {

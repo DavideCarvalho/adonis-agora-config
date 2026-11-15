@@ -42,7 +42,7 @@ export interface ConfigConsoleOptions {
   defaultApp?: string;
   /** `app.inProduction`, for the default gate (open outside production, deny inside). */
   inProduction: boolean;
-  /** Whether this control plane has a secrets key (secrets can be written and revealed). */
+  /** Whether this control plane has an encryption codec (secrets can be written and revealed). */
   secrets: boolean;
   topology: 'standalone' | 'control-plane';
   registry?: AgoraConsoleRegistry;

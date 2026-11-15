@@ -18,13 +18,15 @@ function read(source: unknown, key: string): unknown {
 }
 
 function text(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
 /**
- * Resolves the audit actor, structurally: authkit's per-request identity when there is one
- * (`userId`, `email`, `raw.act.sub`), else `ctx.auth.user` (`id`/`userId`, `email`, `actor.sub`),
- * else `console`. The subject authorizes; the actor is what the audit trail records.
+ * Resolves the audit actor, structurally: authkit's per-request identity when there is one. Wave 1
+ * exposes the impersonator as `identity.actor` (`{ sub, email? }`); older tokens carry the same data
+ * in `identity.raw.act` (RFC 8693), and `ctx.auth.user` is the no-authkit fallback. The subject
+ * authorizes; the actor is what the audit trail records — `actor ?? sub`, exactly the convention.
  */
 export async function consoleActor(ctx: HttpContext): Promise<ConsoleActor> {
   const authkit = read(ctx, 'authkit');
@@ -48,11 +50,19 @@ export async function consoleActor(ctx: HttpContext): Promise<ConsoleActor> {
   const user = read(read(ctx, 'auth'), 'user');
   const sub =
     text(read(identity, 'userId')) ?? text(read(user, 'id')) ?? text(read(user, 'userId'));
+  const act = read(identity, 'actor');
+  const legacyAct = read(read(identity, 'raw'), 'act');
+  const userAct = read(user, 'actor');
   const actor =
-    text(read(read(read(identity, 'raw'), 'act'), 'sub')) ??
-    text(read(read(user, 'actor'), 'sub')) ??
+    text(read(act, 'sub')) ??
+    text(read(legacyAct, 'sub')) ??
+    text(read(userAct, 'sub')) ??
     text(read(user, 'act'));
-  const email = text(read(identity, 'email')) ?? text(read(user, 'email'));
+  const email =
+    text(read(act, 'email')) ??
+    text(read(identity, 'email')) ??
+    text(read(userAct, 'email')) ??
+    text(read(user, 'email'));
   const id = actor ?? sub ?? 'console';
   return { id, ...(email ? { email } : {}) };
 }

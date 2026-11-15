@@ -43,7 +43,6 @@ describe('commands', () => {
             verifyTenant: async () => null,
             store: stores.memory(),
             console: false,
-            secrets: { key: 'command-test-key' },
           }),
         },
       })

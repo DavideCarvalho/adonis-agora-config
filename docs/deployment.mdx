@@ -34,7 +34,7 @@ the scopes it needs (`config:read`, plus `config:secrets:read` only where needed
 
 ```sh
 CONFIG_DB_* …          # its database connection
-APP_KEY=…              # the secrets key
+APP_KEY=…              # the app encryption key (config/encryption.ts)
 AUTHKIT_ISSUER=…       # only the verifier needs it
 ```
 

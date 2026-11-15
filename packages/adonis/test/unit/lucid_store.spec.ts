@@ -93,7 +93,7 @@ describe('LucidStore', () => {
     await s.setup();
     await expect(
       s.write(testScope, [{ key: 'p', value: 'x', secret: true }], { actor: 'ann', now: at }),
-    ).rejects.toThrow(/no secrets key/);
+    ).rejects.toThrow(/no encryption codec/);
   });
 
   it('rolls back and audits, filtered and paginated', async () => {

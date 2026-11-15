@@ -96,7 +96,7 @@ export class DocumentSealer {
       return { ...entry };
     if (!this.codec) {
       throw new Error(
-        '@adonis-agora/config: a secret was written but no secrets key is configured. Set `controlPlane.secrets.key` (usually APP_KEY).',
+        '@adonis-agora/config: a secret was written but no encryption codec is configured. Configure the app encryption service (config/encryption.ts) or pass `controlPlane.secrets.codec`.',
       );
     }
     return { ...entry, value: this.codec.seal(entry.value) };

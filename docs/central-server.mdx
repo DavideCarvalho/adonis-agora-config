@@ -21,7 +21,6 @@ export default defineConfig({
   }),
   prefix: '/_config',
   store: stores.lucid(),
-  secrets: { key: env.get('APP_KEY') },
   vault: {
     async resolve(reference) {
       // Wire authkit's vault packages, AWS Secrets Manager, Vault, …

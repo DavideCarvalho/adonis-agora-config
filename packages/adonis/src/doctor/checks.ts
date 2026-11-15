@@ -31,7 +31,7 @@ async function headers(config: TenantTopologyConfig): Promise<Record<string, str
 
 /**
  * The config checks: can a tenant reach the server, does its token work, is the snapshot fresh,
- * does a Sail worktree keep its own ports, and is there a secrets key. `agora:doctor` runs them;
+ * does a Sail worktree keep its own ports, and is there an encryption codec. `agora:doctor` runs them;
  * cheap checks read config and files, deep ones touch the network (use `--deep`).
  */
 export const agoraDoctorChecks: AgoraDoctorCheck[] = [
@@ -228,7 +228,7 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
   {
     id: 'config.secrets-key',
     lib: 'config',
-    title: 'Secrets key configured',
+    title: 'Secrets encryption configured',
     cost: 'cheap',
     run: async (app): Promise<AgoraDoctorResult> => {
       const config = app.config.get<ConfigConfig | undefined>('config');
@@ -241,21 +241,17 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
       if (config.secrets?.codec) {
         return { status: 'ok', message: 'A custom secrets codec is configured.' };
       }
-      const configured = config.secrets?.key;
-      const key = typeof configured === 'function' ? configured() : configured;
-      if (typeof key === 'string' && key !== '') {
-        return { status: 'ok', message: 'A secrets key is configured.' };
-      }
-      if (process.env.APP_KEY) {
+      const container = app.container as { hasBinding?: (binding: string) => boolean } | undefined;
+      if (container?.hasBinding?.('encryption')) {
         return {
           status: 'ok',
-          message: 'Secrets use APP_KEY (set); a secret written without a key would fail loudly.',
+          message: 'Secrets use the app encryption service (config/encryption.ts).',
         };
       }
       return {
         status: 'warn',
-        message: 'No secrets key and no APP_KEY: writing a secret will fail.',
-        fix: 'Set APP_KEY, or controlPlane.secrets.key, before the first secret.',
+        message: 'No app encryption service: writing a secret will fail.',
+        fix: 'Configure config/encryption.ts (the AdonisJS encryption service) or pass controlPlane.secrets.codec.',
         docs: `${DOCS}/secrets`,
       };
     },

@@ -40,11 +40,9 @@ export const stores = {
 /** How secret values are encrypted at rest. */
 export interface SecretsConfig {
   /**
-   * The key every secret is encrypted with (AES-256-GCM, derived with HKDF). Default: `APP_KEY`.
-   * Rotating it requires re-writing every secret; reading an old one fails loudly, never silently.
+   * A ready-made codec (a KMS-backed one, or a test double). Default: the app's AdonisJS encryption
+   * service (`config/encryption.ts`), with its key, key rotation and purpose binding.
    */
-  key?: string | Buffer | (() => string | Buffer);
-  /** A ready-made codec (a KMS-backed one, or a test double). Wins over `key`. */
   codec?: SecretCodec;
 }
 

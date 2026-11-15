@@ -440,7 +440,7 @@ export class TenantClient {
     try {
       await mkdir(dirname(path), { recursive: true });
       // Write-then-rename: a crash mid-write never leaves a truncated snapshot.
-      await writeFile(`${path}.tmp`, JSON.stringify(document));
+      await writeFile(`${path}.tmp`, JSON.stringify(document), { mode: 0o600 });
       await rename(`${path}.tmp`, path);
     } catch (error) {
       this.options.onError?.(error);
