@@ -175,8 +175,15 @@ export class DocumentSealer {
   }
 
   async openEntry(entry: ConfigEntryState, aad: string): Promise<ConfigEntryState> {
-    if (!entry.secret || typeof entry.value !== 'string' || !this.codec?.owns(entry.value)) {
+    if (!entry.secret || entry.vault !== undefined || entry.value === undefined)
       return { ...entry };
+    if (!this.codec) {
+      throw new Error(
+        '@adonis-agora/config: a secret was read but no encryption keyring is configured. Set APP_KEY or pass `crypto.keys` in config/config.ts.',
+      );
+    }
+    if (typeof entry.value !== 'string' || !this.codec.owns(entry.value)) {
+      throw new Error('@adonis-agora/config: a secret is stored in plain text; re-write it');
     }
     return { ...entry, value: await this.codec.open(entry.value, { aad }) };
   }

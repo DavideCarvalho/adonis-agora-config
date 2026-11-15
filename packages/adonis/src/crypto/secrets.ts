@@ -96,7 +96,7 @@ export function keyringCodec(keyring: Keyring): SecretCodec {
     owns(value): value is string {
       // A secret value is always sealed. Treat every non-empty string as ciphertext so a plaintext
       // value (written by another tool) fails loudly instead of being served as a secret.
-      return typeof value === 'string' && value !== '';
+      return typeof value === 'string';
     },
     status(sealed, options = {}) {
       return sealedStatus(keyring, sealed, {

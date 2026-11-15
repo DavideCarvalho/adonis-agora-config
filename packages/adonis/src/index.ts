@@ -37,6 +37,7 @@ export {
 export { type BootstrapOptions, type BootstrapResult, bootstrapConfig } from './bootstrap.js';
 export {
   CONFIG_SECRET_PURPOSE,
+  type CryptoKey,
   type CryptoOptions,
   createConfigKeyring,
   entryAad,
