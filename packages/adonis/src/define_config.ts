@@ -54,6 +54,12 @@ export interface VaultConfig {
 /** The environment this process belongs to. Default: `production` on a control plane, `NODE_ENV` on a tenant. */
 interface BaseConfig {
   environment?: string;
+  /**
+   * Contribute the "Configuration" telescope dashboard automatically (the provider pushes the
+   * extension into `'agora.telescope.extensions'`). Default on; `false` turns it off, and an
+   * extension listed in `config/telescope.ts` still works either way.
+   */
+  telescope?: boolean | { windowMs?: number };
 }
 
 /** A single app that owns its configuration locally (the console and commands still work). */

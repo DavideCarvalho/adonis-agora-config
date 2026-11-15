@@ -64,6 +64,16 @@
       "types": "./dist/src/doctor/index.d.ts",
       "import": "./dist/src/doctor/index.js",
       "default": "./dist/src/doctor/index.js"
+    },
+    "./diagnostics": {
+      "types": "./dist/src/diagnostics.d.ts",
+      "import": "./dist/src/diagnostics.js",
+      "default": "./dist/src/diagnostics.js"
+    },
+    "./telescope": {
+      "types": "./dist/src/telescope/index.d.ts",
+      "import": "./dist/src/telescope/index.js",
+      "default": "./dist/src/telescope/index.js"
     }
   },
   "files": [

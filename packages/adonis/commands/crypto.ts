@@ -1,5 +1,6 @@
 import { BaseCommand, flags } from '@adonisjs/core/ace';
 import type { CommandOptions } from '@adonisjs/core/types/ace';
+import { emitConfig } from '../src/diagnostics.js';
 import { getRuntime, hasRuntime } from '../src/services/accessor.js';
 
 /**
@@ -53,6 +54,13 @@ export default class ConfigCryptoReseal extends BaseCommand {
     const report = await store.reseal({
       dryRun: this.dryRun === true,
       all: this.all === true,
+    });
+    emitConfig('crypto.reseal', {
+      dryRun: report.dryRun,
+      all: report.all,
+      scanned: report.scanned,
+      resealed: report.resealed,
+      failed: report.failed,
     });
     if (this.json) {
       process.stdout.write(`${JSON.stringify(report)}\n`);

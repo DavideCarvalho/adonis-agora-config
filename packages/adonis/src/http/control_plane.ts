@@ -20,6 +20,7 @@ import {
   type TenantResealUpdate,
 } from '../crypto/tenant_keys.js';
 import type { VaultResolver } from '../define_config.js';
+import { emitConfig } from '../diagnostics.js';
 import type { ConfigStore } from '../store/store.js';
 import {
   bearerToken,
@@ -337,9 +338,16 @@ export class ControlPlane {
         actor: verified.clientId ?? verified.partition,
         now: new Date().toISOString(),
       });
+      const active = keys.find((key) => key.active)?.kid ?? keys[0]?.kid;
+      emitConfig('key.registered', {
+        app: verified.partition,
+        ...(active !== undefined ? { active } : {}),
+        kids: keys.map((key) => key.kid),
+        actor: verified.clientId ?? verified.partition,
+      });
       return ctx.response.json({
         app: verified.partition,
-        active: keys.find((key) => key.active)?.kid ?? keys[0]?.kid,
+        active,
         keys: keys.map((key) => ({
           ...key.publicKey,
           active: key.active,
@@ -390,7 +398,17 @@ export class ControlPlane {
         now: new Date().toISOString(),
         version: body.version,
       });
-      if (result.changed) this.bus.publish(scope, result.version);
+      if (result.changed) {
+        this.bus.publish(scope, result.version);
+        emitConfig('sealed.reseal', {
+          app: scope.app,
+          environment: scope.environment,
+          label: scope.label,
+          version: result.version,
+          actor: verified.clientId ?? verified.partition,
+          keys: result.keys,
+        });
+      }
       return ctx.response.json(result);
     } catch (error) {
       const message = (error as Error).message;

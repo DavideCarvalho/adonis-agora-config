@@ -32,6 +32,7 @@ import {
   type TenantTopologyConfig,
 } from '../src/define_config.js';
 import { registerConfigDevTools } from '../src/dev_tools.js';
+import { emitConfig } from '../src/diagnostics.js';
 import { registerDoctorChecks } from '../src/doctor/agora_doctor.js';
 import { agoraDoctorChecks } from '../src/doctor/checks.js';
 import { ControlPlane } from '../src/http/control_plane.js';
@@ -39,6 +40,8 @@ import type { ConfigRuntime } from '../src/runtime.js';
 import { setRuntime } from '../src/services/accessor.js';
 import { inSchema, type SqlDatabase } from '../src/sql.js';
 import type { ConfigStore } from '../src/store/store.js';
+import { configTelescopeExtension } from '../src/telescope/extension.js';
+import { registerConfigTelescopeExtension } from '../src/telescope/register.js';
 import {
   createTenantClient,
   type TenantClient,
@@ -84,8 +87,24 @@ export default class ConfigProvider {
 
   constructor(protected app: ApplicationService) {}
 
-  register(): void {
+  async register(): Promise<void> {
     this.app.container.singleton('agora.config', () => this.#build());
+    await this.#registerTelescope();
+  }
+
+  /** Pushes the config dashboard into telescope's binding (created-if-absent), unless disabled. */
+  async #registerTelescope(): Promise<void> {
+    try {
+      const config = this.app.config.get<ConfigConfig | undefined>('config');
+      if (config?.telescope === false) return;
+      const options = typeof config?.telescope === 'object' ? config.telescope : {};
+      await registerConfigTelescopeExtension(
+        this.app.container as never,
+        configTelescopeExtension(options),
+      );
+    } catch {
+      // A container without bindValue (a test double) simply has no binding.
+    }
   }
 
   #config(): ConfigConfig {
@@ -158,6 +177,14 @@ export default class ConfigProvider {
       await client.useKeys(keys);
     }
     client.onChange((change) => {
+      emitConfig('tenant.reload', {
+        app: status.app,
+        environment: status.environment,
+        label: status.label,
+        version: change.version,
+        reloadable: change.reloadable,
+        restartRequired: change.restartRequired,
+      });
       if (change.reloadable.length > 0) {
         logger.info(
           `[@adonis-agora/config] hot-reloaded ${change.reloadable.length} key(s): ${change.reloadable.join(', ')}`,

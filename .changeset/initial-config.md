@@ -33,3 +33,5 @@ and `agora:doctor` checks the server, the token and the snapshot.
 `authkitTenantToken` from `@adonis-agora/authkit-client`; the same helper is the tenant's token
 source, and `config:pull` writes the managed `.env.local` block that Sail consumes without shadowing
 its per-worktree ports.
+
+It also ships a `@adonis-agora/telescope` extension (auto-registered): a Configuration dashboard with store health, write activity, recent changes, secret reveals and the tenants seen, plus one `agora:config:*` diagnostics entry per write/reveal/reload (never a value).

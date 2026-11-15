@@ -9,6 +9,7 @@
     "authkit",
     "secrets",
     "console",
+    "telescope",
     "commands",
     "mcp",
     "deployment",

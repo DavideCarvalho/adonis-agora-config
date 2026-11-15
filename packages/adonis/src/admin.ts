@@ -16,6 +16,7 @@ import {
 import { offsetPage } from '@adonis-agora/filter';
 import { sealForApp } from './crypto/tenant_keys.js';
 import type { VaultResolver } from './define_config.js';
+import { emitConfig } from './diagnostics.js';
 import type { ConfigStore, VersionSummary } from './store/store.js';
 
 export interface PageInput {
@@ -181,6 +182,14 @@ export class ConfigAdmin {
     // A sealed value has no reveal: the console never asks for it, and a reveal row would lie.
     if (options.reveal && (entry.secret || entry.vault !== undefined) && !entry.sealedTo) {
       await this.store.recordReveal(scope, key, document!.version, options.reveal.actor);
+      emitConfig('entry.reveal', {
+        app: scope.app,
+        environment: scope.environment,
+        label: scope.label,
+        key,
+        version: document!.version,
+        actor: options.reveal.actor,
+      });
     }
     if (entry.vault !== undefined && options.canReadSecrets && this.#vault) {
       try {
@@ -207,7 +216,24 @@ export class ConfigAdmin {
       now: options.now ?? new Date().toISOString(),
       ...(options.message !== undefined ? { message: options.message } : {}),
     });
-    if (result.changed) this.#onChange?.(scope, result.document.version);
+    if (result.changed) {
+      this.#onChange?.(scope, result.document.version);
+      const entry = result.document.entries[key];
+      if (entry) {
+        emitConfig('entry.set', {
+          app: result.document.app,
+          environment: result.document.environment,
+          label: result.document.label,
+          key,
+          version: result.document.version,
+          actor: options.actor,
+          secret: entry.secret,
+          reloadable: entry.reloadable,
+          ...(entry.sealedTo !== undefined ? { sealedTo: entry.sealedTo } : {}),
+          ...(options.message !== undefined ? { message: options.message } : {}),
+        });
+      }
+    }
     return { version: result.document.version, changed: result.changed };
   }
 
@@ -254,7 +280,23 @@ export class ConfigAdmin {
       now: options.now ?? new Date().toISOString(),
       ...(options.message !== undefined ? { message: options.message } : {}),
     });
-    if (result.changed) this.#onChange?.(scope, result.document.version);
+    if (result.changed) {
+      this.#onChange?.(scope, result.document.version);
+      emitConfig('entry.unset', {
+        app: result.document.app,
+        environment: result.document.environment,
+        label: result.document.label,
+        key,
+        version: result.document.version,
+        actor: options.actor,
+        secret: document.entries[key]?.secret ?? false,
+        reloadable: document.entries[key]?.reloadable ?? false,
+        ...(document.entries[key]?.sealedTo !== undefined
+          ? { sealedTo: document.entries[key]!.sealedTo! }
+          : {}),
+        ...(options.message !== undefined ? { message: options.message } : {}),
+      });
+    }
     return { version: result.document.version, changed: result.changed };
   }
 
@@ -337,7 +379,18 @@ export class ConfigAdmin {
       now: options.now ?? new Date().toISOString(),
       message: options.message ?? `Rollback to version ${to}`,
     });
-    if (result.changed) this.#onChange?.(scope, result.document.version);
+    if (result.changed) {
+      this.#onChange?.(scope, result.document.version);
+      emitConfig('rollback', {
+        app: result.document.app,
+        environment: result.document.environment,
+        label: result.document.label,
+        version: result.document.version,
+        actor: options.actor,
+        toVersion: to,
+        ...(options.message !== undefined ? { message: options.message } : {}),
+      });
+    }
     return { version: result.document.version, changed: result.changed };
   }
 
@@ -391,6 +444,14 @@ export class ConfigAdmin {
       if (entry.sealedTo !== undefined) continue;
       if (canReadSecrets && options.reveal && (entry.secret || entry.vault !== undefined)) {
         await this.store.recordReveal(scope, key, view?.version ?? 0, options.reveal.actor);
+        emitConfig('entry.reveal', {
+          app: scope.app,
+          environment: scope.environment,
+          label: scope.label,
+          key,
+          version: view?.version ?? 0,
+          actor: options.reveal.actor,
+        });
       }
       out[key] = entry.value;
     }
