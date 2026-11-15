@@ -1,0 +1,31 @@
+{{{
+  exports({ to: app.migrationsPath(`${new Date().getTime()}_create_config_tables.ts`) })
+}}}
+import { BaseSchema } from '@adonisjs/lucid/schema'
+import { createConfigTables, dropConfigTables } from '@adonis-agora/config'
+
+/**
+ * The config tables, for apps that run DDL explicitly.
+ *
+ * **You may not need this file.** `@adonis-agora/config` creates its tables at boot
+ * (`autoCreateSchema`, on by default), like the other Agora libraries. Keep this migration if you
+ * want migrations to own the schema, and set `autoCreateSchema: false` in config/config.ts. Both
+ * paths call the same `createConfigTables`.
+ *
+ * With `schema: 'agora'` in config/config.ts, pass the same one here:
+ *   createConfigTables(db as never, { schema: 'agora' })
+ * (the schema is created first; the tables are named `agora.config_versions`, …).
+ */
+export default class extends BaseSchema {
+  async up() {
+    this.defer(async (db) => {
+      await createConfigTables(db as never /* , { schema: 'agora' } */)
+    })
+  }
+
+  async down() {
+    this.defer(async (db) => {
+      await dropConfigTables(db as never /* , { schema: 'agora' } */)
+    })
+  }
+}

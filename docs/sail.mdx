@@ -1,0 +1,93 @@
+---
+title: Sail
+description: A Sail worktree keeps its own ports — the config server never shadows them in development.
+icon: Container
+---
+
+[`@adonis-agora/sail`](https://github.com/DavideCarvalho/adonis-agora-sail) gives every git worktree
+its own Docker stack and writes the resolved ports into `.env.local` (and `.env.test.local`), inside
+its `# sail:start` / `# sail:end` block. Adonis loads `.env.local` over `.env` outside `test`, and
+Sail's `sail:info --env` prints the same keys for scripts.
+
+That file and the config server would disagree the moment a worktree gets an offset port: the server
+says `db.port: 5432`, the worktree's Postgres listens on `5789`. This package resolves it in two
+places, both in Sail's favour.
+
+## 1. The bootstrap never overwrites an existing variable
+
+`bootstrapConfig({ env: true })` fills only variables that are **unset**. `.env.local` is loaded
+before the bootstrap runs (and Sail's keys are in it), so the worktree's ports reach `config/*.ts`
+unchanged:
+
+```ts
+// config/database.ts
+port: env.get('DB_PORT')   // 5789 in this worktree, 5432 in a plain checkout
+```
+
+Nothing to configure: it is the same rule that protects a real environment variable in production.
+
+## 2. `localEnv` makes the same rule hold at runtime
+
+After boot, `config.get('db.port')` would otherwise return the server's value. Outside production the
+provider turns `tenant.localEnv` on: when `process.env` has a variable for a key (`db.port` ←
+`DB_PORT`), it wins, coerced to the remote value's type (a number stays a number).
+
+```ts
+defineConfig({
+  topology: 'tenant',
+  tenant: {
+    // …
+    localEnv: true,   // default: on outside production
+  },
+})
+```
+
+Precedence, from strongest to weakest:
+
+1. a real environment variable (`DB_PORT=… node ace serve`)
+2. `.env.local` / `.env.test.local` — including Sail's per-worktree block
+3. the config server
+4. the default passed to `config.get(key, default)`
+
+In production `localEnv` is off: the config server is the source of truth, and only the bootstrap's
+"never overwrite" rule remains (so a platform-injected variable still wins).
+
+## Pulling the server's values too
+
+Sail owns ports; the config server owns the rest. `config:pull` writes the server's keys into the
+same `.env.local`, in a block of its own, and **skips any key the file already sets** — so Sail's
+ports always win:
+
+```sh
+export CONFIG_URL=https://config.example.com/_config
+export AUTHKIT_ISSUER=https://auth.example.com
+export AUTHKIT_CLIENT_ID=streaming
+export AUTHKIT_CLIENT_SECRET=…
+node ace config:pull --application=streaming --write=.env.local
+```
+
+The command uses `authkitTenantToken` from `@adonis-agora/authkit-client` (lazy import) with the
+`urn:agora:config` resource; no token logic of its own. Pass `--token`/`CONFIG_TOKEN` instead when
+the app uses a shared secret.
+
+The block sits above `# sail:start`, is re-runnable, and is added to `.gitignore`. Without
+`--write`, the command prints `KEY=value` for `eval`/varlock. See [Authkit](/docs/config/authkit)
+for the client-credentials setup.
+
+## Checking it
+
+```ts
+import config from '@adonis-agora/config/services/main'
+
+config.get('db.port')   // 5789 in this worktree, whatever the server says
+config.status()         // where the values came from, and whether localEnv is on
+```
+
+`node ace sail:info --env` and `node ace config:env --application=<app>` agree on every key Sail
+owns. A key only the config server has simply keeps the server's value.
+
+## Tests
+
+Sail runs each worktree's stack on its own ports; a test process started through `sail run` reads the
+same `.env.test.local`. Keep `snapshotPath` inside the worktree (`storage/config/snapshot.json`), which
+is gitignored — two worktrees must never share a snapshot, exactly like they never share a database.

@@ -1,0 +1,118 @@
+---
+title: The control plane
+description: One server owns every app's configuration, with versions, history and audit.
+icon: Server
+---
+
+A control plane has no configuration of its own; it stores everyone else's. Every write is a new
+immutable version of one **scope**: an app (the partition), an environment and a label.
+
+```ts title="config/config.ts"
+import env from '#start/env'
+import { defineConfig, sharedSecretVerifier, stores } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'control-plane',
+  verifyTenant: sharedSecretVerifier({
+    partitions: {
+      streaming: env.get('CONFIG_SECRET_STREAMING'),
+      billing: env.get('CONFIG_SECRET_BILLING'),
+    },
+  }),
+  prefix: '/_config',
+  store: stores.lucid(),
+  vault: {
+    async resolve(reference) {
+      // Wire authkit's vault packages, AWS Secrets Manager, Vault, …
+      return mySecretManager.read(reference.path, reference.field)
+    },
+  },
+})
+```
+
+## Storage
+
+`stores.lucid()` (the default) keeps the configuration in three tables, created at boot:
+
+| Table | Holds |
+| --- | --- |
+| `config_versions` | one row per version: the app, environment, label, version number, the entries as JSON, the fingerprint, who wrote it and why |
+| `config_audit` | one row per changed key (and per rollback and secret reveal): actor, action, before and after |
+| `config_tenant_keys` | the public X25519 keys tenant apps registered, for values sealed to them (never a private key) |
+
+`stores.memory()` is for tests and local development. Secrets are sealed before either store sees
+them, so a dump of the memory store or of the table never holds a plain value. A value sealed to an
+app is `agora:pk1:…` ciphertext there: even the server cannot open it.
+
+For a schema other than the connection's default:
+
+```ts
+defineConfig({ topology: 'control-plane', verifyTenant, schema: 'agora' })
+```
+
+The schema is created on boot (`CREATE SCHEMA IF NOT EXISTS` on Postgres, `CREATE DATABASE IF NOT
+EXISTS` on MySQL) and all three tables — `config_versions`, `config_audit` and `config_tenant_keys` —
+are created there as `agora.config_versions`, …; every query names the schema, so nothing depends on
+`search_path` (safe behind PgBouncer). On SQLite there are no schemas: leave it unset.
+
+`autoCreateSchema: false` turns the boot-time DDL off when migrations own the tables (the migration
+stub in `stubs/database` takes the same `{ schema: 'agora' }`).
+
+## Versions, history and rollback
+
+A version is a number per scope, starting at 1. Reading a scope returns its latest version; reading
+a version returns it exactly as it was.
+
+```ts
+import config from '@adonis-agora/config/services/main'
+
+const store = config.store!
+const scope = { app: 'streaming', environment: 'production', label: 'main' }
+
+const current = await store.read(scope)          // version 7, entries, fingerprint
+const old = await store.readVersion(scope, 3)    // exactly version 3
+await store.listVersions(scope, { number: 1, size: 20 })
+await store.listAudit(scope, { number: 1, size: 20 }, { key: 'db.host' })
+
+await store.rollback(scope, 3, {
+  actor: 'ops@example.com',
+  now: new Date().toISOString(),
+  message: 'revert the pool change',
+})
+```
+
+A rollback is a new version, not a deletion: history stays append-only, and the audit row says who
+rolled back to what.
+
+## What tenants get
+
+Under `prefix` (default `/_config`):
+
+| Route | Answer |
+| --- | --- |
+| `GET /v1/config?label=` | the token's scope as one document, with a strong `ETag`; `If-None-Match` answers `304` |
+| `GET /v1/config/stream` | server-sent `event: config` on every change |
+| `GET /v1/whoami` | the token's partition, environment, label, capabilities and expiry |
+
+The app, the environment and the capabilities always come from the verified token. A header may
+name another app; it is passed to the verifier (a shared secret needs to know which app it is
+proving) and is never trusted on its own.
+
+The SSE stream closes when the token expires, so a tenant reconnects with a fresh one. With several
+control-plane replicas, a stream also polls every 15 seconds: a write handled by another replica is
+seen without depending on an in-process notification.
+
+## CORS
+
+Tenants are servers and need no CORS. When a browser tool must read the API directly, list its
+origins:
+
+```ts
+defineConfig({ topology: 'control-plane', verifyTenant, corsOrigins: ['https://ops.example.com'] })
+```
+
+## Secrets
+
+See [Secrets](/docs/config/secrets). Reading a secret value from the tenant API needs
+`config:secrets:read` in the token; without it the entry arrives `masked: true` and the value is
+absent — never an empty string, so a missing capability cannot be mistaken for a missing value.

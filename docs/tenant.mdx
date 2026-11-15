@@ -1,0 +1,128 @@
+---
+title: An app (tenant)
+description: Fetch the configuration at boot, keep a snapshot, hot-reload what can be reloaded.
+icon: Plug
+---
+
+A tenant owns no configuration. It fetches its scope from the control plane at boot, keeps the last
+document on disk, and stays current over a stream with polling as a fallback.
+
+```ts title="config/config.ts"
+import env from '#start/env'
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),
+    partition: 'streaming',
+    token: env.get('CONFIG_TOKEN'),
+    environment: env.get('NODE_ENV'),
+    snapshotPath: 'storage/config/snapshot.json',
+    reloadable: ['feature.*'],
+  },
+})
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `url` | — | the control plane, including its prefix (`https://config.example.com/_config`) |
+| `partition` | — | this app's name |
+| `token` | — | a string, a function, `{ get() }`, or `authkitTenantToken(...)` |
+| `environment` | `NODE_ENV` | the scope's environment |
+| `label` | `main` | the scope's label (profile, branch) |
+| `snapshotPath` | none | the last document, for booting during an outage |
+| `required` | `false` | fail the boot when the server is unreachable and no snapshot exists |
+| `stream` | `true` | server-sent events; polling always runs |
+| `intervalMs` | `30000` / `5000` | poll interval, with / without streaming |
+| `reloadable` | `[]` | extra keys that may hot-reload, exact or `prefix.*` |
+| `localEnv` | on outside production | let `process.env` win per key (`DB_PORT` for `db.port`) |
+| `env` | `false` | also write the values into `process.env` (unset variables only) |
+| `keyPath` | `storage/config-tenant-key.json` | this app's X25519 private key, sealed with APP_KEY; `false` disables sealed secrets |
+| `registerKey` | `true` | publish the public key to the control plane on connect |
+
+## Booting before the app's config
+
+`config/*.ts` load before providers boot. The bootstrap entry runs before the application exists:
+
+```ts title="bin/server.ts"
+import { bootstrapConfig } from '@adonis-agora/config/bootstrap'
+
+await bootstrapConfig({
+  url: process.env.CONFIG_URL!,
+  partition: process.env.CONFIG_APP!,
+  token: process.env.CONFIG_TOKEN!,
+  snapshotPath: 'storage/config/snapshot.json',
+  env: true,
+})
+
+await import('#start/env')
+const { Ignitor } = await import('@adonisjs/core')
+```
+
+The provider reuses the client it built. Without the bootstrap, values arrive when the provider
+boots: controllers and services see them, `config/*.ts` do not.
+
+## Boot-time and reloadable keys
+
+The app keeps the values it booted with. When a new version arrives:
+
+- a key marked **reloadable** on the control plane (or matched by `tenant.reloadable`) applies
+  immediately — `config.get` returns the new value;
+- every other key is reported as **restart required** and keeps its boot value.
+
+```ts
+import config from '@adonis-agora/config/services/main'
+
+config.onChange((change) => {
+  // change.reloadable      → applied now
+  // change.restartRequired → new value exists, this process keeps the old one
+  // change.added / removed
+})
+```
+
+The provider also emits `config:reloaded` and `config:restart-required` on the app's emitter, and
+logs a warning naming the keys that need a restart.
+
+## When the server is down
+
+At boot, an unreachable server falls back to `snapshotPath`:
+
+```ts
+config.status()
+// { source: 'snapshot', stale: true, version: 7, lastError: 'fetch failed', … }
+```
+
+Without a snapshot, the app boots with its local configuration and logs a warning — unless
+`required: true`, which turns that into a failed boot. A later refresh that succeeds replaces the
+snapshot values with the server's.
+
+## Reading values
+
+```ts
+import config from '@adonis-agora/config/services/main'
+
+config.get('db.host')                    // boot-time key
+config.get('checkout.timeoutMs', 3000)   // reloadable key, with a default
+config.getString('feature.flag')         // env-shaped
+config.all()                             // flat dot-path map
+config.nested()                          // nested object
+```
+
+The service returns `undefined` for a masked secret, exactly like a missing key: a process without
+`config:secrets:read` never mistakes "not allowed" for "not set".
+
+## Testing
+
+```ts
+import { memoryConfig, seedConfig, testScope } from '@adonis-agora/config/testing'
+
+const store = memoryConfig()
+await seedConfig(store, testScope, [
+  ['db.host', 'localhost'],
+  { key: 'stripe.secret', value: 'sk_test', secret: true },
+])
+```
+
+The memory store seals secrets exactly like the database store, so a test cannot accidentally depend
+on plaintext at rest.

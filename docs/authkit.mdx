@@ -1,0 +1,131 @@
+---
+title: Authkit
+description: One service-tenant client, from the app and from Sail, with urn:agora:config.
+icon: Fingerprint
+---
+
+authkit is the recommended auth for a config server. One authkit **service tenant** client per app
+holds the `urn:agora:config` resource; every path — the Adonis tenant, a script and Sail — uses the
+same client credentials, and the control plane derives the app, environment and capabilities from
+the token.
+
+## The service tenant
+
+Register one confidential client per app, with the `client_credentials` grant:
+
+```
+resource: urn:agora:config
+capabilities: config:read
+              config:secrets:read   # only where secret values are needed
+```
+
+Revoking the client cuts the app off at its next token refresh (and closes its open stream).
+
+## The control plane
+
+```ts title="config/config.ts (the server)"
+import { authkitTenantVerifier } from '@adonis-agora/authkit-client'
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'control-plane',
+  verifyTenant: authkitTenantVerifier({
+    issuer: env.get('AUTHKIT_ISSUER'),
+    resource: 'urn:agora:config',
+  }),
+})
+```
+
+Tokens are verified locally against the issuer's JWKS, found through discovery. The verifier is
+called lazily per request; no authkit-server code runs in this process.
+
+## An Adonis app
+
+```ts title="config/config.ts (an app)"
+import { authkitTenantToken } from '@adonis-agora/authkit-client'
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),
+    partition: 'streaming',
+    token: authkitTenantToken({
+      issuer: env.get('AUTHKIT_ISSUER'),
+      clientId: env.get('AUTHKIT_CLIENT_ID'),
+      clientSecret: env.get('AUTHKIT_CLIENT_SECRET'),
+      resource: 'urn:agora:config',
+    }),
+  },
+})
+```
+
+`authkitTenantToken` returns a function with `token()` and `reset()`: it caches the token, refreshes
+it before expiry, and a `401` makes the tenant call `reset()` and fetch a new one. Config has no
+token helper of its own — the authkit-client helper is the whole story. The same function is passed
+to `bootstrapConfig` in `bin/server.ts` (it is lazy; nothing is fetched until the first call).
+
+The bootstrap phase is the one place where the token must be obtainable **before** the app's config
+loads: keep the issuer, client id and secret in the environment, and build the token source there
+too.
+
+## A script or Sail
+
+```ts
+import { authkitTenantToken } from '@adonis-agora/authkit-client'
+import { createConfigClient } from '@adonis-agora/config-client'
+
+const config = createConfigClient({
+  url: process.env.CONFIG_URL!,
+  partition: 'streaming',
+  token: authkitTenantToken({
+    issuer: process.env.AUTHKIT_ISSUER!,
+    clientId: process.env.AUTHKIT_CLIENT_ID!,
+    clientSecret: process.env.AUTHKIT_CLIENT_SECRET!,
+    resource: 'urn:agora:config',
+  }),
+})
+await config.refresh()
+config.get('db.host')
+```
+
+`@adonis-agora/config-client` has no AdonisJS dependency, so it runs in a worker, a Docker entrypoint
+or the Sail CLI. It does the conditional GET, caches the document and exposes `get`/`all`/`nested`/
+`status`.
+
+## Sail
+
+Sail gives every worktree its own ports; the config server has the shared values. `config:pull` is
+the bridge:
+
+```sh
+# in the worktree, with the same authkit client the app uses
+export AUTHKIT_ISSUER=https://auth.example.com
+export AUTHKIT_CLIENT_ID=streaming
+export AUTHKIT_CLIENT_SECRET=…
+export CONFIG_URL=https://config.example.com/_config
+
+node ace config:pull --application=streaming --write=.env.local
+```
+
+It uses `authkitTenantToken` from authkit-client (the CLI imports it lazily) and writes only the
+`# config:start` … `# config:end` block. **A key the file already sets is skipped**, so Sail's
+`# sail:start` ports are never shadowed. Without `--write` it prints `KEY=value` lines (pipe them
+into varlock, `eval`, or a secret manager):
+
+```sh
+set -a; eval "$(node ace config:pull --application=streaming)"; set +a
+varlock run -- node ace serve --hmr
+```
+
+`--secrets` asks for secret values (the token needs `config:secrets:read`); an encrypted
+`.env.local` (`varlock(...)`) is never written — the command refuses and exits 1. A written file is
+added to `.gitignore`.
+
+## Short-lived and least privilege
+
+- `config:read` is enough for everything except secret values; give `config:secrets:read` only to
+  apps that truly need them.
+- The console and CLI use the console gate, not a service token.
+- A token is never stored: the source caches it in memory until shortly before `exp`, and the
+  control plane closes streams when it expires.

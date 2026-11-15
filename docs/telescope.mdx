@@ -1,0 +1,81 @@
+---
+title: Telescope
+description: The Configuration dashboard, and every config event in the telescope timeline.
+icon: Telescope
+---
+
+`@adonis-agora/config` ships a first-class `@adonis-agora/telescope` extension: a **Configuration**
+dashboard (store health, write activity, recent changes, secret reveals, the tenants this control
+plane saw) plus one `diagnostic` entry per config event in the timeline. Nothing about a value is
+ever recorded — only who changed which key, when, and which version it produced.
+
+Both telescope and the diagnostics bus are **optional**: without them the package works exactly the
+same and simply emits nothing.
+
+```sh
+npm i @adonis-agora/diagnostics @adonis-agora/telescope
+```
+
+## Wiring
+
+With both installed, the provider pushes the extension into `'agora.telescope.extensions'`, which
+telescope reads in addition to `config/telescope.ts`. Nothing else to do.
+
+To pass options, or if you prefer the explicit list:
+
+```ts title="config/telescope.ts"
+import { defineConfig } from '@adonis-agora/telescope'
+import { configTelescopeExtension } from '@adonis-agora/config/telescope'
+
+export default defineConfig({
+  extensions: [
+    configTelescopeExtension({ windowMs: 24 * 60 * 60 * 1000 }),
+  ],
+})
+```
+
+A configured extension wins over the auto-registered one (same `name`, `config`), so there is no
+double dashboard. Turn the auto-registration off with:
+
+```ts title="config/config.ts"
+defineConfig({ topology: 'control-plane', verifyTenant, telescope: false })
+```
+
+## What it shows
+
+| Section | |
+| --- | --- |
+| **Health** | entries, secrets, values sealed for an app, and unreadable secrets (warn/bad at 1+) |
+| **Activity** | changes over time split by set / unset / rollback, changes by action, tenants seen |
+| **Audit** | recent changes (paged: app, environment, action, key, actor, version) and secret reveals |
+| **Tenants** | every tenant that reached this control plane since boot, with capabilities and last version |
+
+Live counts read the running `agora.config` store; history is read from the telescope storage
+(`type: 'diagnostic'`, `tag: 'lib:config'`), so it is cluster-wide when telescope's store is shared.
+The tenants table is process-local (in-memory presence), same as the console's overview.
+
+## Events
+
+Every event is published on `agora:config:<event>` through `@adonis-agora/diagnostics` and recorded
+as a generic `diagnostic` entry tagged `lib:config`:
+
+| Event | When | Payload (never a value) |
+| --- | --- | --- |
+| `entry.set` | an entry was written (console, CLI, MCP, admin) | app, environment, label, key, version, actor, secret, reloadable, sealedTo?, message? |
+| `entry.unset` | an entry was removed | same |
+| `rollback` | a past version was copied into a new one | app, environment, label, version, actor, toVersion, message? |
+| `entry.reveal` | a secret value was read through reveal / `--secrets` | app, environment, label, key, version, actor |
+| `sealed.reseal` | a tenant re-sealed values to its active key | app, environment, label, version, actor, keys |
+| `key.registered` | a tenant published its X25519 public keys | app, active, kids, actor |
+| `tenant.reload` | a running tenant applied a version | app, environment, label, version, reloadable, restartRequired |
+| `crypto.reseal` | `config:crypto:reseal` ran | dryRun, all, scanned, resealed, failed |
+
+Consume them directly when telescope is not the only observer:
+
+```ts
+import { onDiagnostic } from '@adonis-agora/diagnostics'
+
+onDiagnostic('config', 'entry.set', (event) => {
+  // event.payload: { app, environment, label, key, version, actor, secret, … }
+})
+```

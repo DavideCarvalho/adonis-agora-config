@@ -1,0 +1,18 @@
+{
+  "title": "Config",
+  "pages": [
+    "index",
+    "getting-started",
+    "central-server",
+    "tenant",
+    "authentication",
+    "authkit",
+    "secrets",
+    "console",
+    "telescope",
+    "commands",
+    "mcp",
+    "deployment",
+    "sail"
+  ]
+}

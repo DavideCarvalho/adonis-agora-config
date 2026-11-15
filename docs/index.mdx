@@ -1,0 +1,67 @@
+---
+title: Config
+description: One configuration server for every AdonisJS app — per app, environment and label, with history, audit and secrets.
+icon: SlidersHorizontal
+---
+
+`@adonis-agora/config` is a centralized configuration server in the shape of Spring Cloud Config.
+One **control plane** owns the configuration of every app; each app is a **tenant** that fetches its
+configuration at boot, keeps a snapshot on disk, and hot-reloads what can be reloaded.
+
+```sh
+node ace add @adonis-agora/config
+```
+
+```ts title="config/config.ts (the server)"
+import { defineConfig, sharedSecretVerifier } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'control-plane',
+  verifyTenant: sharedSecretVerifier({
+    partitions: { streaming: env.get('CONFIG_SECRET_STREAMING') },
+  }),
+})
+```
+
+```ts title="config/config.ts (an app)"
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'tenant',
+  tenant: {
+    url: env.get('CONFIG_URL'),         // https://config.example.com/_config
+    partition: 'streaming',
+    token: env.get('CONFIG_TOKEN'),
+    snapshotPath: 'storage/config/snapshot.json',
+  },
+})
+```
+
+Each app's configuration is a flat map of dot-path keys, per app (**partition**), **environment**
+and **label** (a profile, a branch):
+
+```json
+{
+  "app": "streaming",
+  "environment": "production",
+  "label": "main",
+  "version": 7,
+  "entries": {
+    "db.host": { "value": "db.internal", "secret": false, "reloadable": false },
+    "checkout.timeoutMs": { "value": 3000, "secret": false, "reloadable": true },
+    "stripe.secret": { "value": "sk_live_…", "secret": true, "reloadable": false }
+  }
+}
+```
+
+- **Versioned and audited.** Every write produces a new immutable version of the scope, with the
+  actor (`act` claim, else `sub`). History and rollback are one command away.
+- **Secrets are never stored in plain text.** A secret is encrypted with the app key, or a
+  `vault://` reference resolved at read time. Reading one needs `config:secrets:read`.
+- **Boot never depends on the server.** The last document is kept on disk; an app that boots during
+  an outage still boots with real configuration.
+- **Boot-time vs reloadable keys are explicit.** A key marked reloadable changes on a running app
+  and emits an event; the rest need a restart, and `config.status()` says which.
+- **A console, a CLI, MCP tools and a remote-safe client** edit or read the same entries, with the
+  same versions and audit trail — the client and `config:pull` are how Sail and scripts reach an
+  authkit-secured server.

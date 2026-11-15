@@ -1,0 +1,81 @@
+---
+title: Console
+description: Entries per app, environment and label — edit, diff any two versions, roll back, audit.
+icon: LayoutDashboard
+---
+
+The console lives on the control plane, at the same prefix as the tenant API (`/_config`). It is
+the Agora console shell (the shared tokens, fonts and sidebar), violet where the other consoles have
+their own colour.
+
+```ts title="config/config.ts"
+import { authkitDashboardAuthorize } from '@adonis-agora/authkit-client'
+
+defineConfig({
+  topology: 'control-plane',
+  verifyTenant,
+  console: {
+    // Omitted: open outside production, every request denied in production.
+    authorize: authkitDashboardAuthorize({ role: 'ADMIN' }),
+    revealSecrets: true,
+    // apps: ['streaming', 'billing'],
+  },
+})
+```
+
+`authorize` takes the contract every Agora console uses: an inline function, an authorizer class, or
+a lazy import. `authorizeByToken`, `anyAuthorize` and `resolveConsoleAuthorize` are exported from
+`@adonis-agora/config` for machine access.
+
+## What it does
+
+| Page | |
+| --- | --- |
+| **Entries** | every key of the selected app/environment/label, with its value, secret and reloadable flags, who last wrote it and when. Search, filter and paginate. |
+| **Editor** | set a value (JSON or text), a `vault://` reference, description and the reason; a secret is encrypted at rest, **seal for <app>** hands it to the tenant's key so the server cannot read it, a reloadable key applies without a restart. |
+| **History** | every immutable version: who, when, how many entries and secrets, and why. |
+| **Diff** | any two versions, key by key: added, removed, changed, with secret values masked. |
+| **Rollback** | copies a past version into a new version (history stays append-only), with the reason recorded. |
+| **Audit** | who changed what, when, and why — including `reveal` rows for secrets. |
+
+A secret arrives **masked** in the console. The operator asks for it explicitly (the eye button),
+which calls `POST <api>/entries/:key/reveal` and writes a `reveal` audit row; `revealSecrets: false`
+removes the button entirely. An entry sealed for an app says **sealed for <app>** and has no reveal:
+the control plane holds only ciphertext, and only that app's private key opens it.
+
+## The JSON API
+
+Same-origin, JSON, and the list envelopes follow the Agora list convention (`{ data, meta }`).
+
+| Route | |
+| --- | --- |
+| `GET /meta` | apps, environments, labels, the default scope, whether secrets are configured |
+| `GET /entries?app&environment&label&search&page&size&sort` | entries, filtered and paginated |
+| `GET /entries/:key` | one entry (secret masked) |
+| `PUT /entries/:key` | set value/vault/flags/description; a new version |
+| `DELETE /entries/:key` | unset; a new version |
+| `POST /entries/:key/reveal` | the secret value, audited |
+| `GET /versions` `GET /versions/:version` | history and one version |
+| `GET /diff?from&to` | the changes between two versions |
+| `POST /rollback` | `{ to, message? }` |
+| `GET /audit` | the trail, filtered by `filter[key]` / `filter[action]` |
+| `GET /consoles` `GET /consoles/search?q=` | the console switcher and ⌘K |
+
+An unknown `sort` or `filter[field]` is a **400**; a masked secret is not an error. CORS is the
+host app's.
+
+## Shell, switcher and ⌘K
+
+The page embeds the standard Agora data block (`viewer`, `signOut`, `switcher`, `search`). The
+console joins the `'agora.consoles'` registry as `config`, so every other Agora console lists
+"Configuration" and searches entry keys. With authkit-client, sign-out and the viewer row appear
+with no per-console config; without it, set `console.signOut` and `console.viewer` yourself.
+
+`console.apps` limits the console to a set of apps: the pickers list them and an API request for
+another app is refused with 403.
+
+## Production
+
+The console is a browser app behind your app's auth. Keep the `authorize` rule explicit in
+production: the default denies everything there, and a forgotten rule is a locked door, not an open
+one.
