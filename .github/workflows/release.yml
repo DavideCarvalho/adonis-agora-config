@@ -13,8 +13,10 @@ name: Release
 # No "version packages" PR to merge: merging a PR that carries a changeset IS the release.
 #
 # This repo's packages start at 0.0.0: merging the first PR (which carries a `minor` changeset)
-# publishes 0.1.0. Do not push a changeset to master until npm has a trusted publisher for
-# @adonis-agora/config, @adonis-agora/config-core and @adonis-agora/config-dashboard.
+# publishes 0.1.0. Do not push a changeset to master until npm has a trusted publisher for all
+# four packages: @adonis-agora/config, @adonis-agora/config-core, @adonis-agora/config-client and
+# @adonis-agora/config-dashboard. Each one must allow `npm publish` (this workflow publishes
+# directly, not via `npm stage publish`) and name this file: release.yml.
 on:
   push:
     branches: [master]
