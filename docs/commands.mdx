@@ -32,8 +32,8 @@ node ace config:pull --application=streaming --write=.env.local
 | `config:diff --from=<v> --to=<v>` | added/removed/changed keys between two versions (`--secrets`) |
 | `config:audit` | the trail, filtered by `--key` / `--action` |
 | `config:rollback --to=<version>` | writes a new version from a past one; asks unless `--force` |
-| `config:env` | the resolved values as `KEY=value`, for `eval`/pipes; `--secrets`, `--prefix` |
-| `config:pull` | writes the managed `.env.local` block (or prints without `--write`); `--url`, `--token`, authkit flags, `--secrets` |
+| `config:env` | the resolved values as `KEY=value`, for `eval`/pipes; `--secrets` (audited), `--prefix` |
+| `config:pull` | writes the managed `.env.local` block (or prints without `--write`); `--url`, `--token`, authkit flags, `--secrets` (audited) |
 
 Every command takes `--application`, `--environment` and `--label` (defaults: the app in the
 runtime, the process environment, `main`) and `--json`. A failure sets exit code 1 and writes the

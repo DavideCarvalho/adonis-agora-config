@@ -435,7 +435,9 @@ export class ConfigEnv extends ConfigCommand {
     const values =
       runtime.topology === 'tenant'
         ? runtime.all()
-        : await this.admin.values(await this.scope(), this.secrets === true);
+        : await this.admin.values(await this.scope(), this.secrets === true, {
+            ...(this.secrets === true ? { reveal: { actor: cliActor() } } : {}),
+          });
     const lines = Object.entries(values)
       .map(([key, value]) => [envNameOf(key, this.prefix ?? ''), envValueOf(value)] as const)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));

@@ -8,6 +8,7 @@ import { ConfigAdmin } from '../src/admin.js';
 import { ensureGitignore, hasEncryptedValues, upsertConfigBlock } from '../src/env_file.js';
 import { getRuntime, hasRuntime } from '../src/services/accessor.js';
 import type { TenantTokenSource } from '../src/topology/token.js';
+import { cliActor } from './shared.js';
 
 /**
  * `node ace config:pull --application=shop --write=.env.local` — the bridge between the config
@@ -169,7 +170,9 @@ export default class ConfigPull extends BaseCommand {
     if (localStore) {
       const admin = new ConfigAdmin({ store: localStore });
       return {
-        values: await admin.values(scope, this.secrets === true),
+        values: await admin.values(scope, this.secrets === true, {
+          ...(this.secrets === true ? { reveal: { actor: cliActor() } } : {}),
+        }),
         source: 'store',
       };
     }

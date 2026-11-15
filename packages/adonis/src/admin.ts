@@ -341,12 +341,20 @@ export class ConfigAdmin {
   }
 
   /** Every value of a scope, for `config:env` and the MCP dev tool. */
-  async values(scope: ConfigScope, canReadSecrets: boolean): Promise<Record<string, ConfigValue>> {
+  async values(
+    scope: ConfigScope,
+    canReadSecrets: boolean,
+    options: { reveal?: { actor: string } } = {},
+  ): Promise<Record<string, ConfigValue>> {
     const document = await this.store.read(scope);
     const view = document ? maskDocument(document, canReadSecrets) : null;
     const out: Record<string, ConfigValue> = {};
     for (const [key, entry] of Object.entries(view?.entries ?? {})) {
-      if (entry.value !== undefined) out[key] = entry.value;
+      if (entry.value === undefined) continue;
+      if (canReadSecrets && options.reveal && (entry.secret || entry.vault !== undefined)) {
+        await this.store.recordReveal(scope, key, view?.version ?? 0, options.reveal.actor);
+      }
+      out[key] = entry.value;
     }
     return out;
   }

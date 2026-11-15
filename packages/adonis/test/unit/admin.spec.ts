@@ -134,6 +134,21 @@ describe('ConfigAdmin', () => {
     }
   });
 
+  it('audits the secrets read through values() when asked', async () => {
+    const { store, admin: a } = admin();
+    await seedConfig(store, testScope, [
+      ['plain', 'x'],
+      { key: 'p', value: 'hunter2', secret: true },
+    ]);
+    expect(await a.values(testScope, true, { reveal: { actor: 'cli:ann' } })).toEqual({
+      plain: 'x',
+      p: 'hunter2',
+    });
+    const reveals = await a.audit(testScope, { page: 1, size: 10, action: 'reveal' });
+    expect(reveals.meta.total).toBe(1);
+    expect(reveals.data[0]).toMatchObject({ actor: 'cli:ann', key: 'p' });
+  });
+
   it('notifies the control plane bus after a write, and only then', async () => {
     const store = new MemoryStore({ secretCodec: secretCodec('bus-test') });
     const published: Array<{ app: string; version: number }> = [];
