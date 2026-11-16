@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkVerifiedTenant,
+  requestHeaders,
   resolveTenantVerifier,
   sharedSecretVerifier,
 } from '../../src/topology/verify.js';
@@ -132,5 +133,22 @@ describe('sharedSecretVerifier', () => {
     expect(await verify({ token: 'shop-secret', app: 'other' })).toBeNull();
     expect(await verify({ token: 'billing-secret', app: 'shop' })).toBeNull();
     expect(await verify({ token: '', app: 'shop' })).toBeNull();
+  });
+});
+
+describe('requestHeaders', () => {
+  it("calls headers() on the request, as Adonis' Request needs its `this`", () => {
+    class FakeRequest {
+      request = { headers: { Authorization: 'Bearer t', 'x-multi': ['a', 'b'] } };
+      headers() {
+        return this.request.headers;
+      }
+    }
+    const ctx = { request: new FakeRequest() } as never;
+    expect(requestHeaders(ctx)).toEqual({ authorization: 'Bearer t', 'x-multi': 'a' });
+  });
+
+  it('answers {} without a headers() method', () => {
+    expect(requestHeaders({ request: {} } as never)).toEqual({});
   });
 });
