@@ -126,6 +126,7 @@ export {
   type TenantKeyringOptions,
   type TenantKeyringStatus,
 } from './topology/tenant_keyring.js';
+export { TenantUrl, type TenantUrlSource } from './topology/tenant_url.js';
 export { resolveTenantToken, type TenantToken, type TenantTokenSource } from './topology/token.js';
 export {
   bearerToken,

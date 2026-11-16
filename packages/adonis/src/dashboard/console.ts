@@ -87,9 +87,14 @@ function tokenAuthorize(token: string | undefined) {
  * masking, reveal audit and actor as the commands and the MCP tools. The gate is the resolved
  * `console.authorize`; a browser denial gets the shared access-denied page, an API denial gets
  * `{ error }` with 401/403.
+ *
+ * Which apps a request may see is the static `console.apps` (when set) narrowed by the viewer's
+ * grant: the `apps` an authorizer answered with (`'*'` or omitted: no narrowing).
  */
 export class ConfigConsole {
   readonly #authorize: (ctx: HttpContext) => Promise<ConsoleAuthorizeDecision>;
+  /** The authorizer's `apps` grant for each request it allowed. */
+  readonly #grants = new WeakMap<HttpContext, string[]>();
   #warned = false;
 
   constructor(private readonly options: ConfigConsoleOptions) {
@@ -158,7 +163,10 @@ export class ConfigConsole {
 
   async #guard(ctx: HttpContext, kind: 'api' | 'page'): Promise<boolean> {
     const decision = await this.#authorize(ctx);
-    if (decision.allowed) return true;
+    if (decision.allowed) {
+      if (Array.isArray(decision.apps)) this.#grants.set(ctx, decision.apps);
+      return true;
+    }
     if (decision.status === 302) {
       ctx.response.redirect(decision.redirectTo);
       return false;
@@ -239,7 +247,22 @@ export class ConfigConsole {
     if (this.options.config.apps && !this.options.config.apps.includes(app)) {
       throw new HttpError(403, `app "${app}" is not served by this console`);
     }
+    if (!this.#granted(ctx, app)) {
+      throw new HttpError(403, `app "${app}" is not granted to this viewer`);
+    }
     return { app, environment, label };
+  }
+
+  /** Whether the viewer's grant covers `app` (no grant, or `'*'`: every app). */
+  #granted(ctx: HttpContext, app: string): boolean {
+    const grant = this.#grants.get(ctx);
+    return grant === undefined || grant.includes(app);
+  }
+
+  /** Whether this request may see `app`: inside `console.apps` and the viewer's grant. */
+  #visible(ctx: HttpContext, app: string): boolean {
+    const allowed = this.options.config.apps;
+    return (allowed === undefined || allowed.includes(app)) && this.#granted(ctx, app);
   }
 
   async #actor(ctx: HttpContext): Promise<ConsoleActor> {
@@ -286,7 +309,9 @@ export class ConfigConsole {
       this.options.config.path,
       this.api,
       {
-        ...(this.options.defaultApp ? { app: this.options.defaultApp } : {}),
+        ...(this.options.defaultApp && this.#visible(ctx, this.options.defaultApp)
+          ? { app: this.options.defaultApp }
+          : {}),
         environment: this.options.environment,
         label: DEFAULT_LABEL,
       },
@@ -318,7 +343,11 @@ export class ConfigConsole {
   async meta(ctx: HttpContext) {
     const actor = await this.#actor(ctx);
     const scopes = await this.options.admin.scopes();
-    const apps = this.options.config.apps ?? scopes.apps;
+    const grant = this.#grants.get(ctx);
+    // A granted app the store does not hold yet is listed too, so the viewer can write its first entry.
+    const candidates =
+      this.options.config.apps ?? [...new Set([...scopes.apps, ...(grant ?? [])])].sort();
+    const apps = candidates.filter((app) => this.#visible(ctx, app));
     const defaultApp =
       this.options.defaultApp && apps.includes(this.options.defaultApp)
         ? this.options.defaultApp
@@ -328,7 +357,7 @@ export class ConfigConsole {
       environments: [...new Set([...scopes.environments, this.options.environment])],
       labels: [...new Set([...scopes.labels, DEFAULT_LABEL])],
       default: {
-        app: defaultApp ?? 'app',
+        app: defaultApp ?? (grant === undefined ? 'app' : ''),
         environment: this.options.environment,
         label: DEFAULT_LABEL,
       },

@@ -4,6 +4,7 @@ import type { ApplicationService } from '@adonisjs/core/types';
 import type { ConfigConfig, TenantTopologyConfig } from '../define_config.js';
 import { getRuntime, hasRuntime } from '../services/accessor.js';
 import { createTenantClient } from '../topology/tenant_client.js';
+import { TenantUrl } from '../topology/tenant_url.js';
 import { resolveTenantToken } from '../topology/token.js';
 import type { AgoraDoctorCheck, AgoraDoctorResult } from './agora_doctor.js';
 
@@ -64,10 +65,21 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
         await client.refresh();
         const status = client.status();
         if (status.lastError !== null) {
+          const lazy = typeof config.tenant.url === 'function';
+          if (lazy && client.url === undefined) {
+            return {
+              status: 'error',
+              message: `The lazy tenant.url did not resolve: ${status.lastError}.`,
+              fix: 'Check that the issuer publishes a control plane for urn:agora:config in its discovery document.',
+              docs: `${DOCS}/tenant`,
+            };
+          }
           return {
             status: 'error',
-            message: `${config.tenant.url} answered nothing: ${status.lastError}.`,
-            fix: 'Check CONFIG_URL (including its /_config prefix) and that the control plane is running.',
+            message: `${client.url} answered nothing: ${status.lastError}.`,
+            fix: lazy
+              ? 'Check that the control plane the issuer publishes is running (and its /_config prefix).'
+              : 'Check CONFIG_URL (including its /_config prefix) and that the control plane is running.',
             docs: `${DOCS}/tenant`,
           };
         }
@@ -101,7 +113,8 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
         };
       }
       try {
-        const response = await fetch(`${config.tenant.url.replace(/\/$/, '')}/v1/whoami`, {
+        const base = await new TenantUrl(config.tenant.url).resolve();
+        const response = await fetch(`${base}/v1/whoami`, {
           headers: await headers(config),
         });
         if (response.status === 401) {

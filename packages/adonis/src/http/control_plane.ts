@@ -290,6 +290,16 @@ export class ControlPlane {
     if (etagMatches(ctx.request.header('if-none-match'), etag)) {
       return ctx.response.status(304).send('');
     }
+    // The control plane coordinates the read, so it emits it (attributed to the tenant's app).
+    emitConfig('tenant.fetch', {
+      app: scope.app,
+      environment: scope.environment,
+      label: scope.label,
+      version: view.version,
+      actor: verified.clientId ?? verified.partition,
+      entries: Object.keys(view.entries).length,
+      secrets: verified.capabilities.includes(CONFIG_SCOPES.secretsRead),
+    });
     return ctx.response.json(view);
   }
 

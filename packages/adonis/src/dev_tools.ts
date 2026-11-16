@@ -126,10 +126,23 @@ const MESSAGE: DevToolInputProperty = {
  */
 export function configDevTools(
   admin: ConfigAdmin,
-  options: { actorFor: (call: DevToolCall) => string },
+  options: {
+    actorFor: (call: DevToolCall) => string;
+    /** Whether the caller may see and change `app` (the console's `apps` and the viewer grant). */
+    appAllowed?: (ctx: HttpContext, app: string) => boolean | Promise<boolean>;
+  },
 ): DevTool[] {
-  const scopeOf = (input: Record<string, unknown>, call: DevToolCall) => ({
-    app: required(input, 'app'),
+  const allowed = async (call: DevToolCall, app: string) =>
+    options.appAllowed ? await options.appAllowed(call.ctx, app) : true;
+  const appOf = async (input: Record<string, unknown>, call: DevToolCall) => {
+    const app = required(input, 'app');
+    if (!(await allowed(call, app))) {
+      throw new DevToolError(`app "${app}" is not granted to this caller`);
+    }
+    return app;
+  };
+  const scopeOf = async (input: Record<string, unknown>, call: DevToolCall) => ({
+    app: await appOf(input, call),
     environment: str(input, 'environment') ?? 'production',
     label: str(input, 'label') ?? DEFAULT_LABEL,
     canRead: admin.canRevealSecrets,
@@ -143,7 +156,12 @@ export function configDevTools(
       description:
         'Every app, environment and label that holds configuration on this server. Use the values as the app/environment/label arguments of the other tools.',
       input: { type: 'object', properties: {} },
-      run: async () => admin.scopes(),
+      run: async (_input, call) => {
+        const scopes = await admin.scopes();
+        const apps: string[] = [];
+        for (const app of scopes.apps) if (await allowed(call, app)) apps.push(app);
+        return { ...scopes, apps };
+      },
     },
     {
       name: 'config_list_entries',
@@ -168,7 +186,7 @@ export function configDevTools(
         required: ['app'],
       },
       run: async (input, call) => {
-        const { app, environment, label, canRead } = scopeOf(input, call);
+        const { app, environment, label, canRead } = await scopeOf(input, call);
         const at = paging(input, call);
         const page = await admin.listEntries({ app, environment, label }, canRead, {
           page: at.page,
@@ -198,7 +216,7 @@ export function configDevTools(
         required: ['app', 'key'],
       },
       run: async (input, call) => {
-        const { app, environment, label, canRead } = scopeOf(input, call);
+        const { app, environment, label, canRead } = await scopeOf(input, call);
         const key = required(input, 'key');
         assertConfigKey(key);
         const entry = await admin.getEntry({ app, environment, label }, key, {
@@ -220,7 +238,7 @@ export function configDevTools(
         required: ['app'],
       },
       run: async (input, call) => {
-        const { app, environment, label } = scopeOf(input, call);
+        const { app, environment, label } = await scopeOf(input, call);
         const at = paging(input, call);
         const page = await admin.listVersions(
           { app, environment, label },
@@ -249,7 +267,7 @@ export function configDevTools(
         required: ['app', 'version'],
       },
       run: async (input, call) => {
-        const { app, environment, label, canRead } = scopeOf(input, call);
+        const { app, environment, label, canRead } = await scopeOf(input, call);
         const version = Number(input.version);
         if (!Number.isInteger(version) || version < 1) throw new DevToolError('invalid version');
         const found = await admin.version({ app, environment, label }, version, canRead);
@@ -274,7 +292,7 @@ export function configDevTools(
         required: ['app', 'from', 'to'],
       },
       run: async (input, call) => {
-        const { app, environment, label, canRead } = scopeOf(input, call);
+        const { app, environment, label, canRead } = await scopeOf(input, call);
         const from = Number(input.from);
         const to = Number(input.to);
         if (!Number.isInteger(from) || !Number.isInteger(to)) {
@@ -309,7 +327,7 @@ export function configDevTools(
         required: ['app'],
       },
       run: async (input, call) => {
-        const { app, environment, label } = scopeOf(input, call);
+        const { app, environment, label } = await scopeOf(input, call);
         const at = paging(input, call);
         const page = await admin.audit(
           { app, environment, label },
@@ -365,7 +383,7 @@ export function configDevTools(
       },
       run: async (input, call) => {
         const scope = {
-          app: required(input, 'app'),
+          app: await appOf(input, call),
           environment: str(input, 'environment') ?? 'production',
           label: str(input, 'label') ?? DEFAULT_LABEL,
         };
@@ -423,7 +441,7 @@ export function configDevTools(
       },
       run: async (input, call) => {
         const scope = {
-          app: required(input, 'app'),
+          app: await appOf(input, call),
           environment: str(input, 'environment') ?? 'production',
           label: str(input, 'label') ?? DEFAULT_LABEL,
         };
@@ -458,7 +476,7 @@ export function configDevTools(
       },
       run: async (input, call) => {
         const scope = {
-          app: required(input, 'app'),
+          app: await appOf(input, call),
           environment: str(input, 'environment') ?? 'production',
           label: str(input, 'label') ?? DEFAULT_LABEL,
         };
@@ -484,6 +502,7 @@ export async function registerConfigDevTools(
     admin: ConfigAdmin;
     authorize: (ctx: HttpContext) => Promise<DevToolsDecision>;
     actorFor?: (call: DevToolCall) => string;
+    appAllowed?: (ctx: HttpContext, app: string) => boolean | Promise<boolean>;
   },
 ): Promise<boolean> {
   if (!container.hasBinding(DEV_TOOLS_BINDING)) return false;
@@ -495,6 +514,7 @@ export async function registerConfigDevTools(
     authorize: options.authorize,
     tools: configDevTools(options.admin, {
       actorFor: options.actorFor ?? ((call) => `mcp:${call.caller.id}`),
+      ...(options.appAllowed ? { appAllowed: options.appAllowed } : {}),
     }),
   });
   return true;

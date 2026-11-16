@@ -6,6 +6,7 @@ import type { SqlDatabase } from './sql.js';
 import { LucidStore } from './store/lucid_store.js';
 import { MemoryStore } from './store/memory_store.js';
 import type { ConfigStore } from './store/store.js';
+import { isTenantUrlSource, type TenantUrlSource } from './topology/tenant_url.js';
 import type { TenantTokenSource } from './topology/token.js';
 import type { TenantVerifierInput } from './topology/verify.js';
 import type { ConfigTransportFactory } from './transports/types.js';
@@ -121,8 +122,13 @@ export interface ControlPlaneConfig extends BaseConfig {
 export interface TenantTopologyConfig extends BaseConfig {
   topology: 'tenant';
   tenant: {
-    /** The control plane's base URL (`https://config.example.com/_config`). */
-    url: string;
+    /**
+     * The control plane's base URL (`https://config.example.com/_config`), or a function resolving
+     * it before the first request: `controlPlaneUrl({ issuer, resource: 'urn:agora:config' })` from
+     * `@adonis-agora/authkit-client`. A lazy URL is looked up again (its `refresh()`) when the
+     * control plane stops answering.
+     */
+    url: TenantUrlSource;
     /** This app's name on the control plane (the partition). */
     partition: string;
     /**
@@ -198,14 +204,18 @@ export function resolveStandaloneApp(
 export function defineConfig(config: ConfigConfig): ConfigConfig {
   const raw = config as ConfigConfig & { verifyTenant?: unknown; controlPlane?: unknown };
   if (config.topology === 'tenant') {
-    if (!config.tenant.url) throw new Error('config: tenant.url is required');
+    if (!isTenantUrlSource(config.tenant.url)) {
+      throw new Error(
+        'config: tenant.url is required (an absolute http(s) URL, or a function resolving one)',
+      );
+    }
     if (!config.tenant.partition) throw new Error('config: tenant.partition is required');
     if (!config.tenant.token) {
       throw new Error(
         "config: tenant.token is required (authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' }) or the shared secret)",
       );
     }
-    if (!/^https?:\/\//.test(config.tenant.url)) {
+    if (typeof config.tenant.url === 'string' && !/^https?:\/\//.test(config.tenant.url)) {
       throw new Error('config: tenant.url must be an absolute http(s) URL');
     }
     if (raw.verifyTenant !== undefined) {

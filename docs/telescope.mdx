@@ -57,7 +57,10 @@ The tenants table is process-local (in-memory presence), same as the console's o
 ## Events
 
 Every event is published on `agora:config:<event>` through `@adonis-agora/diagnostics` and recorded
-as a generic `diagnostic` entry tagged `lib:config`:
+as a generic `diagnostic` entry tagged `lib:config`. An event about an app also carries it as the
+envelope `app` (`@adonis-agora/diagnostics` 1.0.0-rc.6+), so Telescope tags it `app:<name>`. The
+process that coordinates an action emits it: the control plane emits `key.registered`,
+`sealed.reseal` and `tenant.fetch` for its tenants, and the tenants do not repeat them.
 
 | Event | When | Payload (never a value) |
 | --- | --- | --- |
@@ -68,6 +71,7 @@ as a generic `diagnostic` entry tagged `lib:config`:
 | `sealed.reseal` | a tenant re-sealed values to its active key | app, environment, label, version, actor, keys |
 | `key.registered` | a tenant published its X25519 public keys | app, active, kids, actor |
 | `tenant.reload` | a running tenant applied a version | app, environment, label, version, reloadable, restartRequired |
+| `tenant.fetch` | the control plane served a tenant its document (a `304` poll is not an event) | app, environment, label, version, actor, entries, secrets |
 | `crypto.reseal` | `config:crypto:reseal` ran | dryRun, all, scanned, resealed, failed |
 
 Consume them directly when telescope is not the only observer:
@@ -76,6 +80,7 @@ Consume them directly when telescope is not the only observer:
 import { onDiagnostic } from '@adonis-agora/diagnostics'
 
 onDiagnostic('config', 'entry.set', (event) => {
+  // event.app: the app the entry belongs to
   // event.payload: { app, environment, label, key, version, actor, secret, … }
 })
 ```

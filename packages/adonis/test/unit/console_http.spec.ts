@@ -316,4 +316,49 @@ describe('config console API', () => {
     expect((await fetch(`${base}/api/entries?app=shop`, { headers: auth })).status).toBe(200);
     expect((await fetch(`${base}/api/entries?app=billing`, { headers: auth })).status).toBe(403);
   });
+
+  it('narrows the console to the viewer grant, inside the static apps list', async () => {
+    const { base, store } = await start({
+      apps: ['shop', 'billing'],
+      console: {
+        authorize: (ctx) => {
+          const who = ctx.request.header('x-viewer');
+          if (who === 'shop-only') return { allowed: true, apps: ['shop', 'hr'] };
+          if (who === 'all') return { allowed: true, apps: '*' };
+          return { allowed: false, reason: 'unauthenticated' };
+        },
+      },
+    });
+    await seedConfig(store, { ...testScope, app: 'billing' }, [['db.host', 'billing-db']]);
+    const shopOnly = { 'x-viewer': 'shop-only' };
+    const meta = await (await fetch(`${base}/api/meta`, { headers: shopOnly })).json();
+    // `hr` is granted but outside `console.apps`: the static list stays the upper bound.
+    expect(meta.apps).toEqual(['shop']);
+    expect(meta.default.app).toBe('shop');
+    expect((await fetch(`${base}/api/entries?app=shop`, { headers: shopOnly })).status).toBe(200);
+    const billing = await fetch(`${base}/api/entries?app=billing`, { headers: shopOnly });
+    expect(billing.status).toBe(403);
+    expect(await billing.json()).toEqual({ error: 'app "billing" is not granted to this viewer' });
+    const write = await fetch(`${base}/api/entries/x?app=billing`, {
+      method: 'PUT',
+      headers: { ...shopOnly, 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 1 }),
+    });
+    expect(write.status).toBe(403);
+    expect((await fetch(`${base}/api/entries?app=hr`, { headers: shopOnly })).status).toBe(403);
+
+    const all = await (await fetch(`${base}/api/meta`, { headers: { 'x-viewer': 'all' } })).json();
+    expect(all.apps).toEqual(['shop', 'billing']);
+  });
+
+  it('lists granted apps the store does not hold yet when there is no static list', async () => {
+    const { base } = await start({
+      console: { authorize: () => ({ allowed: true, apps: ['billing'] }) },
+    });
+    const meta = await (await fetch(`${base}/api/meta`)).json();
+    expect(meta.apps).toEqual(['billing']);
+    expect(meta.default.app).toBe('billing');
+    const html = await (await fetch(`${base}/`)).text();
+    expect(html).not.toContain('"app":"shop"');
+  });
 });
