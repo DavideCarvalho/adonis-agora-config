@@ -183,7 +183,10 @@ export default class ConfigPull extends BaseCommand {
       };
     }
 
-    const url = this.url ?? process.env.CONFIG_URL ?? runtime?.client?.url;
+    const url =
+      this.url ??
+      process.env.CONFIG_URL ??
+      (await runtime?.client?.resolveUrl().catch(() => undefined));
     if (!url) {
       throw new Error(
         'no control plane URL: pass --url, set CONFIG_URL, or run inside a tenant that has one',

@@ -13,6 +13,7 @@ import {
 import { entryAad } from '../crypto/secrets.js';
 import type { ConfigTransport } from '../transports/types.js';
 import type { TenantKeyring } from './tenant_keyring.js';
+import { TenantUrl, type TenantUrlSource } from './tenant_url.js';
 import { resolveTenantToken, type TenantToken, type TenantTokenSource } from './token.js';
 
 /** What changed in one update, split by whether the app may apply it without a restart. */
@@ -65,8 +66,13 @@ export interface TenantKeyStatus {
 }
 
 export interface TenantClientOptions {
-  /** The control plane's base URL, with its prefix (`https://config.example.com/_config`). */
-  url: string;
+  /**
+   * The control plane's base URL, with its prefix (`https://config.example.com/_config`), or a
+   * function resolving it (`controlPlaneUrl(...)` from `@adonis-agora/authkit-client`). A lazy URL
+   * resolves before the first request and is looked up again (`refresh()`) when the control plane
+   * stops answering or answers 404.
+   */
+  url: TenantUrlSource;
   /** This app's name (the partition). */
   partition: string;
   token: TenantTokenSource;
@@ -121,15 +127,19 @@ interface BootstrapEntry {
   at: number;
 }
 
-/** The client a `bootstrapConfig()` call already built and started, for the provider to reuse. */
+/**
+ * The client a `bootstrapConfig()` call already built and started, for the provider to reuse. A lazy
+ * `url` is keyed as such (resolving it here would mean a lookup): a bootstrap and a provider that
+ * both use one for the same partition share the client.
+ */
 export function tenantBootstrapKey(options: {
-  url: string;
+  url: TenantUrlSource;
   partition: string;
   environment?: string;
   label?: string;
 }): string {
   return [
-    options.url.replace(/\/$/, ''),
+    typeof options.url === 'string' ? options.url.replace(/\/$/, '') : '<lazy>',
     options.partition,
     options.environment ?? '',
     options.label ?? DEFAULT_LABEL,
@@ -185,8 +195,10 @@ export class TenantClient {
   #keysRegistered: boolean | null = null;
   #keysError: string | undefined;
   #sealed = { sealed: 0, unreadable: 0, staleKids: [] as string[] };
+  readonly #url: TenantUrl;
 
   constructor(private readonly options: TenantClientOptions) {
+    this.#url = new TenantUrl(options.url);
     this.#token = resolveTenantToken(options.token);
     // A stored `fetch` must be bound: `this.#fetch(...)` would otherwise call it with `this` set to
     // this client, which browsers reject with "Illegal invocation".
@@ -217,13 +229,53 @@ export class TenantClient {
     return this.options.label ?? DEFAULT_LABEL;
   }
 
-  /** The control plane URL this client reads (used by `config:pull`). */
-  get url(): string {
-    return this.options.url.replace(/\/$/, '');
+  /**
+   * The control plane URL this client reads (used by `config:pull`); `undefined` until a lazy
+   * `url` first resolves.
+   */
+  get url(): string | undefined {
+    return this.#url.current;
   }
 
-  get #base(): string {
-    return (this.options.transport?.url ?? this.options.url).replace(/\/$/, '');
+  /** The control plane URL, resolving a lazy `url` first. */
+  resolveUrl(): Promise<string> {
+    return this.#url.resolve();
+  }
+
+  /** Where requests go: the transport's override, else the (resolved) `url`. */
+  async #base(): Promise<string> {
+    const override = this.options.transport?.url;
+    return override !== undefined ? override.replace(/\/$/, '') : this.#url.resolve();
+  }
+
+  /** The URL for messages, without resolving anything. */
+  get #shownBase(): string {
+    return (
+      this.options.transport?.url?.replace(/\/$/, '') ??
+      this.#url.current ??
+      'the control plane (its URL never resolved)'
+    );
+  }
+
+  /**
+   * Sends one request to `<base><path>`. With a lazy `url` (and no transport override), a
+   * connection error or a 404 looks the URL up again and, when it moved, retries once there.
+   */
+  async #send(path: string, send: (url: string) => Promise<Response>): Promise<Response> {
+    const base = await this.#base();
+    const movable = this.options.transport?.url === undefined && this.#url.lazy;
+    let response: Response;
+    try {
+      response = await send(`${base}${path}`);
+    } catch (error) {
+      if (!movable || (error as { name?: unknown })?.name === 'AbortError') throw error;
+      if (!(await this.#url.refresh())) throw error;
+      return send(`${await this.#base()}${path}`);
+    }
+    if (response.status === 404 && movable && (await this.#url.refresh())) {
+      return send(`${await this.#base()}${path}`);
+    }
+    return response;
   }
 
   #headers(): Record<string, string> {
@@ -251,11 +303,11 @@ export class TenantClient {
     if (this.#boot === null) {
       if (this.options.required) {
         throw new Error(
-          `config: cannot reach ${this.#base} and there is no snapshot${this.options.snapshotPath ? ` at ${this.options.snapshotPath}` : ''} (tenant.required is on)`,
+          `config: cannot reach ${this.#shownBase} and there is no snapshot${this.options.snapshotPath ? ` at ${this.options.snapshotPath}` : ''} (tenant.required is on)`,
         );
       }
       this.options.logger?.warn(
-        `[@adonis-agora/config] cannot reach ${this.#base} and there is no snapshot: the app boots with its local configuration`,
+        `[@adonis-agora/config] cannot reach ${this.#shownBase} and there is no snapshot: the app boots with its local configuration`,
       );
       this.#boot = {};
       this.#live = {};
@@ -411,11 +463,13 @@ export class TenantClient {
       const headers = await this.#headers();
       headers.authorization = await this.#authorization();
       headers['content-type'] = 'application/json';
-      return this.#fetch(`${this.#base}/v1/keys`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ active: keys.activeKid, keys: keys.publicKeys() }),
-      });
+      return this.#send('/v1/keys', (url) =>
+        this.#fetch(url, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ active: keys.activeKid, keys: keys.publicKeys() }),
+        }),
+      );
     };
     try {
       let response = await send();
@@ -485,11 +539,13 @@ export class TenantClient {
       const headers = await this.#headers();
       headers.authorization = await this.#authorization();
       headers['content-type'] = 'application/json';
-      return this.#fetch(`${this.#base}/v1/sealed`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ version: document.version, entries: updates }),
-      });
+      return this.#send('/v1/sealed', (url) =>
+        this.#fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ version: document.version, entries: updates }),
+        }),
+      );
     };
     let response = await send();
     if (response.status === 401) {
@@ -546,7 +602,7 @@ export class TenantClient {
           headers['if-none-match'] =
             `"${this.app}:${this.environment}:${this.label}:${this.#version}"`;
         }
-        return this.#request(`${this.#base}/v1/config`, { headers });
+        return this.#send('/v1/config', (url) => this.#request(url, { headers }));
       };
       let response = await request();
       if (response.status === 401) {
@@ -779,14 +835,15 @@ export class TenantClient {
     while (!this.#stopped) {
       this.#streamAbort = new AbortController();
       try {
-        const response = await this.#fetch(`${this.#base}/v1/config/stream`, {
-          headers: {
-            ...this.#headers(),
-            authorization: await this.#authorization(),
-            accept: 'text/event-stream',
-          },
-          signal: this.#streamAbort.signal,
-        });
+        const signal = this.#streamAbort.signal;
+        const headers = {
+          ...this.#headers(),
+          authorization: await this.#authorization(),
+          accept: 'text/event-stream',
+        };
+        const response = await this.#send('/v1/config/stream', (url) =>
+          this.#fetch(url, { headers, signal }),
+        );
         if (response.status === 401) this.#token.reset?.();
         if (!response.ok || !response.body) throw new Error(`stream answered ${response.status}`);
         this.#streaming = true;

@@ -433,6 +433,15 @@ export default class ConfigProvider {
     }
   }
 
+  /** Whether this request may see `app`: inside `console.apps` and the viewer's `apps` grant. */
+  async #appAllowed(ctx: HttpContext, app: string): Promise<boolean> {
+    const allowed = this.#consoleConfig?.apps;
+    if (allowed && !allowed.includes(app)) return false;
+    const decision = await this.#authorize(ctx);
+    if (!decision.allowed) return false;
+    return !Array.isArray(decision.apps) || decision.apps.includes(app);
+  }
+
   /** The console's resolved gate, also used by the switcher and the dev tools. */
   async #authorize(ctx: HttpContext): Promise<ConsoleAuthorizeDecision> {
     const configured = this.#consoleConfig?.authorize;
@@ -505,13 +514,16 @@ export default class ConfigProvider {
           return { allowed: false, reason: decision.reason };
         },
         search: configConsoleSearch(
-          async () => ({
-            keys: (scope) =>
-              this.#admin!.keys({
-                app: scope.app || defaults.app,
+          async (ctx) => ({
+            keys: async (scope) => {
+              const app = scope.app || defaults.app;
+              if (!(await this.#appAllowed(ctx, app))) return [];
+              return this.#admin!.keys({
+                app,
                 environment: scope.environment || defaults.environment,
                 label: scope.label || defaults.label,
-              }),
+              });
+            },
           }),
           config.path,
         ),
@@ -533,6 +545,7 @@ export default class ConfigProvider {
         }
         return { allowed: false, reason: decision.reason };
       },
+      appAllowed: (ctx, app) => this.#appAllowed(ctx, app),
     });
   }
 

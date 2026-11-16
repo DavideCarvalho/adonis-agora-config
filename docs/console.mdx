@@ -71,8 +71,25 @@ console joins the `'agora.consoles'` registry as `config`, so every other Agora 
 "Configuration" and searches entry keys. With authkit-client, sign-out and the viewer row appear
 with no per-console config; without it, set `console.signOut` and `console.viewer` yourself.
 
+## Which apps a viewer sees
+
 `console.apps` limits the console to a set of apps: the pickers list them and an API request for
 another app is refused with 403.
+
+`authorize` can narrow that per viewer by answering `{ allowed: true, apps }`, the same grant the
+telescope and flags consoles take:
+
+```ts
+authorize: async (ctx) => {
+  const user = ctx.auth.user
+  if (!user) return { allowed: false, reason: 'unauthenticated' }
+  return { allowed: true, apps: user.isAdmin ? '*' : user.managedApps }
+},
+```
+
+The viewer sees and changes only those apps, in the pickers, the API, ⌘K and the MCP tools.
+`'*'` (or no `apps`) means every app. `console.apps` stays the upper bound: a granted app outside
+it is still refused.
 
 ## Production
 
