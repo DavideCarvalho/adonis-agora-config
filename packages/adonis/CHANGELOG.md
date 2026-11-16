@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.4.1
+
+### Patch Changes
+
+- [#13](https://github.com/DavideCarvalho/adonis-agora-config/pull/13) [`30094cf`](https://github.com/DavideCarvalho/adonis-agora-config/commit/30094cf008169862468047ac3c35f445132ccc44) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Control plane: tenant requests no longer fail with `TypeError: Cannot read properties of undefined (reading 'request')`. The headers handed to `verifyTenant` are read with `ctx.request.headers()` called as a method, so every tenant call (`/v1/config`, `/v1/whoami`, `/v1/keys`, the stream) works against a real Adonis request.
+
 ## 0.4.0
 
 ### Minor Changes
