@@ -206,11 +206,11 @@ export function bearerToken(ctx: HttpContext): string | undefined {
 
 /** The headers a verifier may need, lowercased. */
 export function requestHeaders(ctx: HttpContext): Record<string, string | undefined> {
-  const headers = (ctx.request as unknown as { headers?: () => Record<string, string | string[]> })
-    .headers;
-  if (typeof headers !== 'function') return {};
+  const request = ctx.request as unknown as { headers?: () => Record<string, string | string[]> };
+  if (typeof request.headers !== 'function') return {};
   const out: Record<string, string | undefined> = {};
-  for (const [name, value] of Object.entries(headers())) {
+  // Called as a method: Adonis' `Request#headers()` reads `this.request`.
+  for (const [name, value] of Object.entries(request.headers())) {
     out[name.toLowerCase()] = Array.isArray(value) ? value[0] : value;
   }
   return out;
