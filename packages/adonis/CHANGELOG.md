@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.4.2
+
+### Patch Changes
+
+- [#14](https://github.com/DavideCarvalho/adonis-agora-config/pull/14) [`90a5c49`](https://github.com/DavideCarvalho/adonis-agora-config/commit/90a5c49f50dceabcf6e181c783e0f41c12fecf65) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `transports.redis({ connection })` takes the connection from the app container instead of `@adonisjs/redis/services/main`. That service is only set once the app has booted, while a control plane builds its transport during provider boot, so an ace command such as `migration:run` crashed with `Cannot read properties of undefined (reading 'connection')`.
+
 ## 0.4.1
 
 ### Patch Changes
