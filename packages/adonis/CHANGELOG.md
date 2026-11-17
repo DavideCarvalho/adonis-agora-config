@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.4.3
+
+### Patch Changes
+
+- [#17](https://github.com/DavideCarvalho/adonis-agora-config/pull/17) [`a611f0a`](https://github.com/DavideCarvalho/adonis-agora-config/commit/a611f0ae6c4cb090044c9ffd2ad8f3a0ea6398be) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Ships the console with its filters in the URL (copy the link to share a filtered view). The console is bundled into this package at build time, so it needs its own release to reach apps.
+
 ## 0.4.2
 
 ### Patch Changes
