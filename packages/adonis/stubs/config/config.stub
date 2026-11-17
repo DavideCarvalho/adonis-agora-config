@@ -1,11 +1,14 @@
+{{{
+  exports({ to: app.configPath('config.ts') })
+}}}
 import env from '#start/env'
 import { defineConfig } from '@adonis-agora/config'
 
 /**
  * This app reads its configuration from the Agora config server.
  *
- * The values reach `config/*.ts` only through the bootstrap entry in `bin/server.ts`
- * (`import { bootstrapConfig } from '@adonis-agora/config/bootstrap'`), because config files load
+ * The values reach \`config/*.ts\` only through the bootstrap entry in \`bin/server.ts\`
+ * (\`import { bootstrapConfig } from '@adonis-agora/config/bootstrap'\`), because config files load
  * before any provider boots. Without it, values arrive at boot for controllers and services.
  */
 export default defineConfig({

@@ -195,6 +195,28 @@ describe('config console API', () => {
 
     const versions = await (await fetch(`${base}/api/versions?app=shop`, { headers: auth })).json();
     expect(versions.data[0].version).toBe(2);
+    // By cursor: no total, and the next page continues below the last version.
+    const firstVersion = await (
+      await fetch(`${base}/api/versions?app=shop&first=1`, { headers: auth })
+    ).json();
+    expect(firstVersion.meta).toMatchObject({ hasNext: true, hasPrev: false });
+    expect(firstVersion.meta.total).toBeUndefined();
+    const nextVersion = await (
+      await fetch(`${base}/api/versions?app=shop&first=1&after=${firstVersion.meta.nextCursor}`, {
+        headers: auth,
+      })
+    ).json();
+    expect(nextVersion.data.map((v: { version: number }) => v.version)).toEqual([1]);
+    const auditByCursor = await (
+      await fetch(`${base}/api/audit?app=shop&first=1&filter[action]=reveal`, { headers: auth })
+    ).json();
+    expect(auditByCursor.data).toHaveLength(1);
+    expect(auditByCursor.meta).toMatchObject({ hasNext: false, nextCursor: null });
+    for (const query of ['after=forged', 'before=x&last=1']) {
+      expect((await fetch(`${base}/api/audit?app=shop&${query}`, { headers: auth })).status).toBe(
+        400,
+      );
+    }
     const diff = await (
       await fetch(`${base}/api/diff?app=shop&from=1&to=2`, { headers: auth })
     ).json();

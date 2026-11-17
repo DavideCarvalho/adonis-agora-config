@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { parseAsInteger, parseAsString, useQueryStates } from 'nuqs';
-import { EmptyState, PageHeader, Pager, Panel, QueryBoundary } from '../agora-kit';
+import { parseAsArrayOf, parseAsString, useQueryStates } from 'nuqs';
+import { EmptyState, PageHeader, Panel, QueryBoundary } from '../agora-kit';
 import { type Column, DataTable } from '../agora-kit/blocks/data-table';
 import { Badge } from '../agora-kit/ui/badge';
 import { Skeleton } from '../agora-kit/ui/skeleton';
 import type { AuditRow } from '../client/config-client';
 import { useConsole } from './console-context';
+import { CursorPager, useCursorPager } from './cursor-pager';
 import { exactTime, relativeTime } from './format';
 
 const ACTION_TONE: Record<AuditRow['action'], 'good' | 'warn' | 'info' | 'violet'> = {
@@ -54,20 +55,24 @@ const columns: Column<AuditRow>[] = [
   },
 ];
 
-/** The audit trail's view, in the hash's query (`#/audit?action=reveal&page=2`). Both are explicit
- *  picks, so each adds a history entry; a new action goes back to page 1. */
+/** The audit trail's view, in the hash's query (`#/audit?action=reveal&after=…`). Both are explicit
+ *  picks, so each adds a history entry; a new action goes back to the first page. Pages walk by
+ *  cursor, so the trail shows no total. */
 export const auditParams = {
-  page: parseAsInteger.withDefault(1),
   action: parseAsString.withDefault(''),
+  /** The cursor stack {@link useCursorPager} keeps; listed so an action change can clear it. */
+  after: parseAsArrayOf(parseAsString),
 };
 
 export function AuditPage() {
   const { api, scope } = useConsole();
-  const [{ page, action }, setView] = useQueryStates(auditParams, { history: 'push' });
-  const setPage = (next: number) => void setView({ page: next });
+  const [{ action }, setView] = useQueryStates(auditParams, { history: 'push' });
+  const pager = useCursorPager();
+  const after = pager.after;
   const query = useQuery({
-    queryKey: ['audit', scope, page, action],
-    queryFn: () => api.audit(scope, { page, size: 50, ...(action ? { action } : {}) }),
+    queryKey: ['audit', scope, after, action],
+    queryFn: () =>
+      api.audit(scope, { size: 50, ...(after ? { after } : {}), ...(action ? { action } : {}) }),
   });
 
   return (
@@ -78,14 +83,14 @@ export function AuditPage() {
       />
       <Panel
         title="Changes"
-        description={query.data ? `${query.data.meta.total} rows` : undefined}
+        description={query.data ? `page ${pager.page}` : undefined}
         flush
         action={
           <select
             aria-label="Action"
             className="h-8 rounded-md border border-border bg-panel-2 px-2 text-[11px] text-dim"
             value={action}
-            onChange={(event) => void setView({ action: event.target.value, page: null })}
+            onChange={(event) => void setView({ action: event.target.value, after: null })}
           >
             <option value="">every action</option>
             <option value="set">set</option>
@@ -121,7 +126,12 @@ export function AuditPage() {
                 rows={data.data}
                 rowKey={(row) => row.id}
               />
-              <Pager meta={data.meta} onPage={setPage} />
+              <CursorPager
+                meta={data.meta}
+                page={pager.page}
+                onNext={() => pager.next(data.meta.nextCursor)}
+                onPrevious={pager.previous}
+              />
             </div>
           )}
         </QueryBoundary>

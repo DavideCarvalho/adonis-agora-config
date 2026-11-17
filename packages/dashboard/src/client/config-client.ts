@@ -30,6 +30,19 @@ export interface Page<T> {
   meta: OffsetMeta;
 }
 
+/** The cursor envelope's `meta`: no total, opaque cursors. */
+export interface CursorMeta {
+  nextCursor: string | null;
+  prevCursor: string | null;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+export interface CursorPage<T> {
+  data: T[];
+  meta: CursorMeta;
+}
+
 export interface Version {
   version: number;
   createdAt: string;
@@ -207,10 +220,15 @@ export class ConfigApi {
     );
   }
 
-  versions(scope: Scope, page = 1, size = 20): Promise<Page<Version>> {
+  /** Versions newest first, by cursor: hand `meta.nextCursor` back as `after`. */
+  versions(
+    scope: Scope,
+    options: { after?: string; size?: number } = {},
+  ): Promise<CursorPage<Version>> {
+    const after = options.after ? `&after=${encodeURIComponent(options.after)}` : '';
     return this.#request(
       'GET',
-      `/versions?${this.#scope(scope)}&page=${page}&size=${size}&sort=-version`,
+      `/versions?${this.#scope(scope)}&first=${options.size ?? 20}${after}&sort=-version`,
     );
   }
 
@@ -239,16 +257,17 @@ export class ConfigApi {
 
   audit(
     scope: Scope,
-    options: { page?: number; size?: number; action?: string; key?: string } = {},
-  ): Promise<Page<AuditRow>> {
+    options: { after?: string; size?: number; action?: string; key?: string } = {},
+  ): Promise<CursorPage<AuditRow>> {
+    // By cursor: no total, and a deep page costs what the first one does.
     const query = new URLSearchParams({
       app: scope.app,
       environment: scope.environment,
       label: scope.label,
-      page: String(options.page ?? 1),
-      size: String(options.size ?? 50),
+      first: String(options.size ?? 50),
       sort: '-at',
     });
+    if (options.after) query.set('after', options.after);
     if (options.action) query.set('filter[action]', options.action);
     if (options.key) query.set('filter[key]', options.key);
     return this.#request('GET', `/audit?${query}`);

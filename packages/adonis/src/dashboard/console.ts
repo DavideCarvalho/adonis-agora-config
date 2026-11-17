@@ -7,7 +7,7 @@ import {
   DEFAULT_LABEL,
   toConfigValue,
 } from '@adonis-agora/config-core';
-import { InvalidColumnFilterError } from '@adonis-agora/filter';
+import { InvalidColumnFilterError, parseCursorParams } from '@adonis-agora/filter';
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ConfigAdmin } from '../admin.js';
 import { booleanFilter, parseListQuery } from '../http/list.js';
@@ -51,6 +51,24 @@ export interface ConfigConsoleOptions {
 
 /** This console's id in the `'agora.consoles'` registry. */
 export const CONSOLE_ID = 'config';
+
+/**
+ * The cursor half of a list request (`first`, `after`), or `undefined` when it pages by `page`/`size`.
+ * Forward only: `before`/`last` are a 400.
+ */
+function readCursor(
+  query: Record<string, unknown>,
+  maxSize: number,
+  defaultSize: number,
+): { size: number; after?: string } | undefined {
+  const sent = (name: string) => query[name] !== undefined && query[name] !== '';
+  if (!['first', 'after', 'last', 'before'].some(sent)) return undefined;
+  const params = parseCursorParams(query, { defaultSize, maxSize });
+  if (params.before !== undefined || params.backward) {
+    throw new HttpError(400, 'this list pages forward only: use after and first');
+  }
+  return { size: params.size, ...(params.after !== undefined ? { after: params.after } : {}) };
+}
 
 class HttpError extends Error {
   constructor(
@@ -494,6 +512,15 @@ export class ConfigConsole {
       defaultSize: 20,
       maxSize: 100,
     });
+    const cursor = readCursor(ctx.request.qs() as Record<string, unknown>, 100, 20);
+    if (cursor !== undefined) {
+      return ctx.response.json(
+        await this.options.admin.versionsCursor(scope, {
+          ...cursor,
+          direction: list.sort.direction,
+        }),
+      );
+    }
     return ctx.response.json(
       await this.options.admin.listVersions(scope, {
         page: list.page,
@@ -551,6 +578,19 @@ export class ConfigConsole {
     });
     const action = list.filters.action;
     const key = list.filters.key;
+    const cursor = readCursor(ctx.request.qs() as Record<string, unknown>, 200, 50);
+    if (cursor !== undefined) {
+      if (list.sort.field !== 'at' || list.sort.direction !== 'desc') {
+        throw new HttpError(400, 'the audit pages by cursor newest first only (sort=-at)');
+      }
+      return ctx.response.json(
+        await this.options.admin.auditCursor(scope, {
+          ...cursor,
+          ...(typeof action === 'string' ? { action } : {}),
+          ...(typeof key === 'string' ? { key } : {}),
+        }),
+      );
+    }
     return ctx.response.json(
       await this.options.admin.audit(scope, {
         page: list.page,

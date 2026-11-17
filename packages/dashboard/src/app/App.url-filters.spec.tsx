@@ -24,6 +24,32 @@ function page<T>(data: T[], currentPage = 1, lastPage = 3) {
   };
 }
 
+/** Three cursor pages of the trail: `c1` → page 2, `c2` → page 3 (the last). */
+function auditPage(after: string | null) {
+  const n = after === null ? 1 : Number(after.slice(1)) + 1;
+  return {
+    data: [
+      {
+        id: `audit-${n}`,
+        app: 'shop',
+        environment: 'production',
+        label: 'main',
+        actor: `actor-p${n}`,
+        action: 'set',
+        key: 'k',
+        version: n,
+        at: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+    meta: {
+      nextCursor: n < 3 ? `c${n}` : null,
+      prevCursor: null,
+      hasNext: n < 3,
+      hasPrev: n > 1,
+    },
+  };
+}
+
 function entry(key: string) {
   return {
     key,
@@ -51,7 +77,9 @@ beforeEach(() => {
       ? META
       : url.includes('/entries')
         ? page([entry(`key-p${params.get('page')}`)], Number(params.get('page')))
-        : page([]);
+        : url.includes('/audit')
+          ? auditPage(params.get('after'))
+          : page([]);
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -125,5 +153,29 @@ describe('the config console: view state in the URL', () => {
 
     fireEvent.change(screen.getByLabelText('env'), { target: { value: 'production' } });
     await waitFor(() => expect(window.location.hash).toBe('#/audit?action=reveal'));
+  });
+
+  it('the audit walks by cursor: next pushes `after`, back pops it, an action resets it', async () => {
+    window.history.replaceState(null, '', '/config#/audit');
+    renderApp();
+    await screen.findByText('actor-p1');
+    const lastAudit = () =>
+      new URL(urls.filter((u) => u.includes('/audit')).at(-1) ?? '/', 'http://x').searchParams;
+    expect(lastAudit().get('first')).toBe('50');
+    expect(lastAudit().get('page')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Next page'));
+    await screen.findByText('actor-p2');
+    await waitFor(() => expect(window.location.hash).toBe('#/audit?after=c1'));
+    fireEvent.click(screen.getByLabelText('Next page'));
+    await screen.findByText('actor-p3');
+    await waitFor(() => expect(window.location.hash).toBe('#/audit?after=c1,c2'));
+    expect((screen.getByLabelText('Next page') as HTMLButtonElement).disabled).toBe(true);
+
+    act(() => window.history.back());
+    await screen.findByText('actor-p2');
+    fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'reveal' } });
+    await waitFor(() => expect(window.location.hash).toBe('#/audit?action=reveal'));
+    expect(lastAudit().get('after')).toBeNull();
   });
 });

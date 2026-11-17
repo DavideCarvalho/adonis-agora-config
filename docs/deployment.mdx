@@ -82,6 +82,33 @@ safe behind PgBouncer in transaction mode. The schema and its three tables (`con
 (`autoCreateSchema: false`) when migrations own the tables, passing the same `schema` to
 `createConfigTables`.
 
+`configure` also publishes `add_config_audit_indexes`, a migration of its own. It indexes the audit
+trail by scope and time, by scope, key and time, and by scope, action and time, so the console's
+Audit page reads a scope's newest rows from an index. `createConfigTables` does not create these.
+On Postgres the migration builds them `CONCURRENTLY`, so writes go on during the build. Run it once
+on an existing install. If you installed before it existed, add it yourself:
+
+```ts title="database/migrations/xxxx_add_config_audit_indexes.ts"
+import { BaseSchema } from '@adonisjs/lucid/schema'
+import { createConfigAuditIndexes, dropConfigAuditIndexes } from '@adonis-agora/config'
+
+export default class extends BaseSchema {
+  static disableTransactions = true
+
+  async up() {
+    this.defer(async (db) => {
+      await createConfigAuditIndexes(db as never /* , { schema: 'agora' } */)
+    })
+  }
+
+  async down() {
+    this.defer(async (db) => {
+      await dropConfigAuditIndexes(db as never /* , { schema: 'agora' } */)
+    })
+  }
+}
+```
+
 ## Rolling out a change
 
 A key marked `reloadable` applies on every tenant within one poll/stream cycle. A boot-time key

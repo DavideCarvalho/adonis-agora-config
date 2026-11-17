@@ -70,6 +70,11 @@ Same-origin, JSON, and the list envelopes follow the Agora list convention (`{ d
 An unknown `sort` or `filter[field]` is a **400**; a masked secret is not an error. CORS is the
 host app's.
 
+`GET /audit` and `GET /versions` also page by cursor. Send `first` (and `after` with the previous
+page's `meta.nextCursor`) and the answer is `{ data, meta: { nextCursor, prevCursor, hasNext,
+hasPrev } }`, with no total. A deep page costs what the first one does. The console pages this way;
+`page`/`size` keep the offset envelope and its total.
+
 ## Shell, switcher and ⌘K
 
 The page embeds the standard Agora data block (`viewer`, `signOut`, `switcher`, `search`). The
