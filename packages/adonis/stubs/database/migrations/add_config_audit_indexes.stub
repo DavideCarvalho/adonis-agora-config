@@ -1,0 +1,32 @@
+{{{
+  exports({ to: app.migrationsPath(`${new Date().getTime() + 1}_add_config_audit_indexes.ts`) })
+}}}
+import { BaseSchema } from '@adonisjs/lucid/schema'
+import { createConfigAuditIndexes, dropConfigAuditIndexes } from '@adonis-agora/config'
+
+/**
+ * The audit trail's list indexes: the console's Audit page reads a scope's newest rows, by key,
+ * by action or unfiltered, straight from an index. Run it once on an existing install; it creates
+ * only the indexes that are missing.
+ *
+ * On Postgres every index is built CONCURRENTLY, so writes go on while it builds. That cannot run
+ * inside a transaction, hence \`disableTransactions\`.
+ *
+ * With \`schema: 'agora'\` in config/config.ts, pass the same one here:
+ *   createConfigAuditIndexes(db as never, { schema: 'agora' })
+ */
+export default class extends BaseSchema {
+  static disableTransactions = true
+
+  async up() {
+    this.defer(async (db) => {
+      await createConfigAuditIndexes(db as never /* , { schema: 'agora' } */)
+    })
+  }
+
+  async down() {
+    this.defer(async (db) => {
+      await dropConfigAuditIndexes(db as never /* , { schema: 'agora' } */)
+    })
+  }
+}

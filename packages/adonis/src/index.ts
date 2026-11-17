@@ -23,6 +23,7 @@ export {
 } from '@adonis-agora/config-core';
 export {
   ConfigAdmin,
+  ConfigCursorError,
   type EntryFilters,
   type EntryRow,
   type EntrySort,
@@ -100,11 +101,15 @@ export {
 export { LucidStore, type LucidStoreOptions } from './store/lucid_store.js';
 export { MemoryStore } from './store/memory_store.js';
 export {
+  CONFIG_AUDIT_INDEXES,
   type ConfigSchemaOptions,
+  createConfigAuditIndexes,
   createConfigTables,
+  dropConfigAuditIndexes,
   dropConfigTables,
 } from './store/schema.js';
 export type {
+  AuditPosition,
   ConfigStore,
   StorePage,
   TenantPublicKey,

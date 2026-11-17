@@ -9,6 +9,7 @@ import {
 } from '@adonis-agora/config-core';
 import { entryAad, type SecretCodec } from '../crypto/secrets.js';
 import {
+  type AuditPosition,
   applyChanges,
   auditRows,
   type ConfigStore,
@@ -167,21 +168,74 @@ export class MemoryStore implements ConfigStore {
     page: { number: number; size: number },
     filters: { key?: string; action?: string } = {},
   ): Promise<StorePage<ConfigAuditRecord>> {
-    const matching = [...this.#audit]
-      .reverse()
-      .filter(
-        (row) =>
-          row.app === scope.app &&
-          row.environment === scope.environment &&
-          row.label === scope.label &&
-          (filters.key === undefined || row.key === filters.key) &&
-          (filters.action === undefined || row.action === filters.action),
-      );
+    const matching = this.#auditInOrder().filter(
+      (row) =>
+        row.app === scope.app &&
+        row.environment === scope.environment &&
+        row.label === scope.label &&
+        (filters.key === undefined || row.key === filters.key) &&
+        (filters.action === undefined || row.action === filters.action),
+    );
     const start = (page.number - 1) * page.size;
     const rows = await Promise.all(
       matching.slice(start, start + page.size).map((row) => this.#sealer.openAudit(row)),
     );
     return { rows, total: matching.length };
+  }
+
+  async seekVersions(
+    scope: ConfigScope,
+    query: { limit: number; order: 'asc' | 'desc'; from?: number },
+  ): Promise<VersionSummary[]> {
+    const all = [...(this.#versions.get(scopeKey(scope)) ?? [])].sort((a, b) =>
+      query.order === 'asc' ? a.version - b.version : b.version - a.version,
+    );
+    const from = query.from;
+    return all
+      .filter(
+        (doc) =>
+          from === undefined || (query.order === 'asc' ? doc.version > from : doc.version < from),
+      )
+      .slice(0, query.limit)
+      .map((document) => {
+        const counts = countsOf(document);
+        return {
+          version: document.version,
+          createdAt: document.createdAt,
+          createdBy: document.createdBy,
+          ...(document.message !== undefined ? { message: document.message } : {}),
+          entries: counts.entries,
+          secrets: counts.secrets,
+          fingerprint: document.fingerprint,
+        };
+      });
+  }
+
+  async seekAudit(
+    scope: ConfigScope,
+    query: {
+      limit: number;
+      after?: AuditPosition;
+      filters?: { key?: string; action?: string };
+    },
+  ): Promise<ConfigAuditRecord[]> {
+    const filters = query.filters ?? {};
+    const after = query.after;
+    const matching = this.#auditInOrder().filter(
+      (row) =>
+        row.app === scope.app &&
+        row.environment === scope.environment &&
+        row.label === scope.label &&
+        (filters.key === undefined || row.key === filters.key) &&
+        (filters.action === undefined || row.action === filters.action) &&
+        (after === undefined || auditNewer(after, row) > 0),
+    );
+    return Promise.all(matching.slice(0, query.limit).map((row) => this.#sealer.openAudit(row)));
+  }
+
+  /** The trail newest first by `(at, version, id)`, the SQL store's order. */
+  #auditInOrder() {
+    return [...this.#audit].reverse().sort((a, b) => auditNewer(b, a));
   }
 
   async #reseal(dryRun: boolean, all: boolean): Promise<ResealReport> {
@@ -262,4 +316,14 @@ export class MemoryStore implements ConfigStore {
       at: new Date().toISOString(),
     });
   }
+}
+
+/** `> 0` when `a` comes after `b` in time: `(at, version, id)` compared in that order. */
+function auditNewer(
+  a: { at: string; version: number; id: string },
+  b: { at: string; version: number; id: string },
+): number {
+  if (a.at !== b.at) return a.at < b.at ? -1 : 1;
+  if (a.version !== b.version) return a.version - b.version;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }

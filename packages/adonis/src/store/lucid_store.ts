@@ -20,6 +20,7 @@ import {
 } from '../sql.js';
 import { createConfigTables } from './schema.js';
 import {
+  type AuditPosition,
   applyChanges,
   auditRows,
   type ConfigStore,
@@ -58,6 +59,9 @@ interface VersionRow {
   created_by: string;
   created_at: string;
 }
+
+const AUDIT_COLUMNS =
+  'id, app, environment, label, actor, action, entry_key, version, message, before, after, at';
 
 interface AuditRow {
   id: string;
@@ -183,21 +187,45 @@ export class LucidStore implements ConfigStore {
     );
     return {
       total: toNumber(total[0]?.total),
-      rows: await Promise.all(
-        rows.map(async (row) => {
-          const document = this.#sealedDocument(row);
-          const counts = countsOf(document);
-          return {
-            version: document.version,
-            createdAt: document.createdAt,
-            createdBy: document.createdBy,
-            ...(document.message !== undefined ? { message: document.message } : {}),
-            entries: counts.entries,
-            secrets: counts.secrets,
-            fingerprint: document.fingerprint,
-          };
-        }),
-      ),
+      rows: await Promise.all(rows.map(async (row) => this.#summary(row))),
+    };
+  }
+
+  async seekVersions(
+    scope: ConfigScope,
+    query_: { limit: number; order: 'asc' | 'desc'; from?: number },
+  ): Promise<VersionSummary[]> {
+    const order = query_.order === 'asc' ? 'ASC' : 'DESC';
+    const seek =
+      query_.from === undefined ? '' : ` AND version ${query_.order === 'asc' ? '>' : '<'} ?`;
+    const rows = await query<VersionRow>(
+      this.db,
+      `SELECT ${DOCUMENT_COLUMNS} FROM config_versions
+       WHERE app = ? AND environment = ? AND label = ?${seek}
+       ORDER BY version ${order} LIMIT ?`,
+      [
+        scope.app,
+        scope.environment,
+        scope.label,
+        ...(query_.from === undefined ? [] : [query_.from]),
+        query_.limit,
+      ],
+    );
+    return rows.map((row) => this.#summary(row));
+  }
+
+  /** One version row as history lists it: counts, never the entries. */
+  #summary(row: VersionRow): VersionSummary {
+    const document = this.#sealedDocument(row);
+    const counts = countsOf(document);
+    return {
+      version: document.version,
+      createdAt: document.createdAt,
+      createdBy: document.createdBy,
+      ...(document.message !== undefined ? { message: document.message } : {}),
+      entries: counts.entries,
+      secrets: counts.secrets,
+      fingerprint: document.fingerprint,
     };
   }
 
@@ -414,15 +442,48 @@ export class LucidStore implements ConfigStore {
     );
     const rows = await query<AuditRow>(
       this.db,
-      `SELECT id, app, environment, label, actor, action, entry_key, version, message, before, after, at
-       FROM config_audit WHERE ${clause}
-       ORDER BY at DESC, version DESC LIMIT ? OFFSET ?`,
+      `SELECT ${AUDIT_COLUMNS} FROM config_audit WHERE ${clause}
+       ORDER BY at DESC, version DESC, id DESC LIMIT ? OFFSET ?`,
       [...bindings, page.size, (page.number - 1) * page.size],
     );
     return {
       rows: await Promise.all(rows.map((row) => this.#audit(row))),
       total: toNumber(total[0]?.total),
     };
+  }
+
+  async seekAudit(
+    scope: ConfigScope,
+    query_: {
+      limit: number;
+      after?: AuditPosition;
+      filters?: { key?: string; action?: string };
+    },
+  ): Promise<ConfigAuditRecord[]> {
+    const where = ['app = ?', 'environment = ?', 'label = ?'];
+    const bindings: unknown[] = [scope.app, scope.environment, scope.label];
+    const filters = query_.filters ?? {};
+    if (filters.key !== undefined) {
+      where.push('entry_key = ?');
+      bindings.push(filters.key);
+    }
+    if (filters.action !== undefined) {
+      where.push('action = ?');
+      bindings.push(filters.action);
+    }
+    const after = query_.after;
+    if (after !== undefined) {
+      // `(at, version, id) < (?, ?, ?)`, spelled so every dialect still range-scans `at`.
+      where.push('at <= ? AND (at < ? OR version < ? OR (version = ? AND id < ?))');
+      bindings.push(after.at, after.at, after.version, after.version, after.id);
+    }
+    const rows = await query<AuditRow>(
+      this.db,
+      `SELECT ${AUDIT_COLUMNS} FROM config_audit WHERE ${where.join(' AND ')}
+       ORDER BY at DESC, version DESC, id DESC LIMIT ?`,
+      [...bindings, query_.limit],
+    );
+    return Promise.all(rows.map((row) => this.#audit(row)));
   }
 
   async #reseal(dryRun: boolean, all: boolean): Promise<ResealReport> {

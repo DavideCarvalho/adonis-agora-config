@@ -23,6 +23,8 @@ export async function configure(command: Configure) {
   const stubs = stubsRoot();
   await codemods.makeUsingStub(stubs, 'config/config.stub', {});
   await codemods.makeUsingStub(stubs, 'database/migrations/create_config_tables.stub', {});
+  // Opt-in on an existing install (CONCURRENTLY on Postgres): the audit trail's list indexes.
+  await codemods.makeUsingStub(stubs, 'database/migrations/add_config_audit_indexes.stub', {});
 
   await codemods.defineEnvValidations({
     leadingComment: 'Agora config server',

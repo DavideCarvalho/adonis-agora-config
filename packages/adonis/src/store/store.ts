@@ -30,6 +30,13 @@ export interface StorePage<T> {
   total: number;
 }
 
+/** A position in the audit trail, newest first: the `(at, version, id)` of one row. */
+export interface AuditPosition {
+  at: string;
+  version: number;
+  id: string;
+}
+
 /** Who writes: always a resolved actor (`actor ?? sub`). */
 export interface WriteContext {
   actor: string;
@@ -77,6 +84,27 @@ export interface ConfigStore {
     page: { number: number; size: number },
     filters?: { key?: string; action?: string },
   ): Promise<StorePage<ConfigAuditRecord>>;
+  /**
+   * Keyset read of the audit trail, newest first by `(at, version, id)`: rows strictly past `after`,
+   * at most `limit`. No count, no offset — what the console pages with. Optional for third-party
+   * stores: without it a cursor request is refused and `page` keeps working.
+   */
+  seekAudit?(
+    scope: ConfigScope,
+    query: {
+      limit: number;
+      after?: AuditPosition;
+      filters?: { key?: string; action?: string };
+    },
+  ): Promise<ConfigAuditRecord[]>;
+  /**
+   * Keyset read of a scope's versions in `order`, strictly past version `from` (below it newest
+   * first, above it oldest first), at most `limit`. Optional, as {@link seekAudit}.
+   */
+  seekVersions?(
+    scope: ConfigScope,
+    query: { limit: number; order: 'asc' | 'desc'; from?: number },
+  ): Promise<VersionSummary[]>;
   /** Records that somebody read a secret value (the console's reveal). */
   recordReveal(scope: ConfigScope, key: string, version: number, actor: string): Promise<void>;
   /** X25519 public keys registered by an app, newest registration first. */

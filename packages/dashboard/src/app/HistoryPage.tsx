@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { parseAsInteger, useQueryStates } from 'nuqs';
 import { useState } from 'react';
-import { EmptyState, PageHeader, Pager, Panel, QueryBoundary } from '../agora-kit';
+import { EmptyState, PageHeader, Panel, QueryBoundary } from '../agora-kit';
 import { type Column, DataTable } from '../agora-kit/blocks/data-table';
 import { Badge } from '../agora-kit/ui/badge';
 import { Button } from '../agora-kit/ui/button';
@@ -17,6 +17,7 @@ import { Input } from '../agora-kit/ui/input';
 import { Skeleton } from '../agora-kit/ui/skeleton';
 import type { DiffRow, Entry, Version } from '../client/config-client';
 import { useConsole } from './console-context';
+import { CursorPager, useCursorPager } from './cursor-pager';
 import { exactTime, preview, relativeTime } from './format';
 
 function entryValue(entry: Entry | undefined): string {
@@ -151,12 +152,11 @@ function RollbackDialog({ version, onClose }: { version: number; onClose: () => 
 }
 
 /**
- * The History page's view, in the hash's query (`#/history?page=2&version=12&from=10&to=12`): the
- * versions page, the version open on the right (none = the latest) and the two versions diffed.
- * Every one is an explicit pick, so each adds a history entry.
+ * The History page's view, in the hash's query (`#/history?after=…&version=12&from=10&to=12`): the
+ * versions page (walked by cursor, see `useCursorPager`), the version open on the right (none = the
+ * latest) and the two versions diffed. Every one is an explicit pick, so each adds a history entry.
  */
 export const historyParams = {
-  page: parseAsInteger.withDefault(1),
   version: parseAsInteger,
   from: parseAsInteger,
   to: parseAsInteger,
@@ -164,16 +164,17 @@ export const historyParams = {
 
 export function HistoryPage() {
   const { api, scope } = useConsole();
-  const [{ page, version: selected, from: diffFrom, to: diffTo }, setView] = useQueryStates(
+  const [{ version: selected, from: diffFrom, to: diffTo }, setView] = useQueryStates(
     historyParams,
     { history: 'push' },
   );
-  const setPage = (next: number) => void setView({ page: next });
+  const pager = useCursorPager();
+  const after = pager.after;
   const [rollingBack, setRollingBack] = useState<number | null>(null);
 
   const versions = useQuery({
-    queryKey: ['versions', scope, page],
-    queryFn: () => api.versions(scope, page, 20),
+    queryKey: ['versions', scope, after],
+    queryFn: () => api.versions(scope, { size: 20, ...(after ? { after } : {}) }),
   });
   const latest = versions.data?.data[0]?.version ?? null;
   const current = selected ?? latest;
@@ -223,7 +224,7 @@ export function HistoryPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel
           title="Versions"
-          description={versions.data ? `${versions.data.meta.total} versions` : undefined}
+          description={versions.data ? `page ${pager.page}` : undefined}
           flush
         >
           <QueryBoundary
@@ -251,7 +252,12 @@ export function HistoryPage() {
                     version.version === current ? 'bg-brand-soft/60' : undefined
                   }
                 />
-                <Pager meta={data.meta} onPage={setPage} />
+                <CursorPager
+                  meta={data.meta}
+                  page={pager.page}
+                  onNext={() => pager.next(data.meta.nextCursor)}
+                  onPrevious={pager.previous}
+                />
               </div>
             )}
           </QueryBoundary>

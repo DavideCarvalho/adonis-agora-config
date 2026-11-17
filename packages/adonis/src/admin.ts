@@ -13,11 +13,16 @@ import {
   type OffsetPage,
   parseVaultReference,
 } from '@adonis-agora/config-core';
-import { offsetPage } from '@adonis-agora/filter';
+import {
+  type CursorPageResponse,
+  decodeCursor,
+  encodeCursor,
+  offsetPage,
+} from '@adonis-agora/filter';
 import { sealForApp } from './crypto/tenant_keys.js';
 import type { VaultResolver } from './define_config.js';
 import { emitConfig } from './diagnostics.js';
-import type { ConfigStore, VersionSummary } from './store/store.js';
+import type { AuditPosition, ConfigStore, VersionSummary } from './store/store.js';
 import type { ConfigTransport } from './transports/types.js';
 
 export interface PageInput {
@@ -439,6 +444,78 @@ export class ConfigAdmin {
     );
   }
 
+  /**
+   * The audit trail by cursor, newest first: `after` is a previous page's `meta.nextCursor`. No
+   * count and no offset, so a deep page costs what the first does. Throws on a cursor it did not
+   * issue, or when the store cannot seek (see `ConfigStore.seekAudit`).
+   */
+  async auditCursor(
+    scope: ConfigScope,
+    options: { size: number; after?: string; key?: string; action?: string },
+  ): Promise<CursorPageResponse<ConfigAuditRecord>> {
+    const seek = this.store.seekAudit?.bind(this.store);
+    if (seek === undefined)
+      throw new ConfigCursorError('this store cannot page the audit by cursor');
+    const after = options.after === undefined ? undefined : auditPositionOf(options.after);
+    const rows = await seek(scope, {
+      limit: options.size + 1,
+      ...(after !== undefined ? { after } : {}),
+      filters: {
+        ...(options.key !== undefined ? { key: options.key } : {}),
+        ...(options.action !== undefined ? { action: options.action } : {}),
+      },
+    });
+    const page = rows.slice(0, options.size);
+    const last = page.at(-1);
+    const hasNext = rows.length > options.size;
+    return {
+      data: page.map((row) => this.#maskAudit(row)),
+      meta: {
+        nextCursor:
+          hasNext && last !== undefined ? encodeCursor([last.at, last.version, last.id]) : null,
+        prevCursor: null,
+        hasNext,
+        hasPrev: after !== undefined,
+      },
+    };
+  }
+
+  /** Versions by cursor (`direction: 'asc'` reads oldest first), as {@link auditCursor}. */
+  async versionsCursor(
+    scope: ConfigScope,
+    options: { size: number; after?: string; direction?: 'asc' | 'desc' },
+  ): Promise<CursorPageResponse<VersionSummary>> {
+    const seek = this.store.seekVersions?.bind(this.store);
+    if (seek === undefined) {
+      throw new ConfigCursorError('this store cannot page the versions by cursor');
+    }
+    let from: number | undefined;
+    if (options.after !== undefined) {
+      const values = decodeCursor(options.after);
+      if (values?.length !== 1 || !Number.isInteger(values[0])) {
+        throw new ConfigCursorError('invalid cursor');
+      }
+      from = values[0] as number;
+    }
+    const rows = await seek(scope, {
+      limit: options.size + 1,
+      order: options.direction === 'asc' ? 'asc' : 'desc',
+      ...(from !== undefined ? { from } : {}),
+    });
+    const page = rows.slice(0, options.size);
+    const last = page.at(-1);
+    const hasNext = rows.length > options.size;
+    return {
+      data: page,
+      meta: {
+        nextCursor: hasNext && last !== undefined ? encodeCursor([last.version]) : null,
+        prevCursor: null,
+        hasNext,
+        hasPrev: from !== undefined,
+      },
+    };
+  }
+
   #maskAudit(row: ConfigAuditRecord): ConfigAuditRecord {
     // The trail is a reading surface of its own: a secret's before/after stays masked even for an
     // operator allowed to reveal it, so a list can never leak a value without a `reveal` row.
@@ -484,4 +561,27 @@ export class ConfigAdmin {
     }
     return out;
   }
+}
+
+/** A cursor the console cannot use: one it did not issue, or a store that cannot seek. */
+export class ConfigCursorError extends Error {
+  readonly status = 400;
+  constructor(message: string) {
+    super(`config: ${message}`);
+    this.name = 'ConfigCursorError';
+  }
+}
+
+function auditPositionOf(cursor: string): AuditPosition {
+  const values = decodeCursor(cursor);
+  const [at, version, id] = values ?? [];
+  if (
+    values?.length !== 3 ||
+    typeof at !== 'string' ||
+    !Number.isInteger(version) ||
+    typeof id !== 'string'
+  ) {
+    throw new ConfigCursorError('invalid cursor');
+  }
+  return { at, version: version as number, id };
 }
