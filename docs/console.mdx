@@ -43,6 +43,12 @@ which calls `POST <api>/entries/:key/reveal` and writes a `reveal` audit row; `r
 removes the button entirely. An entry sealed for an app says **sealed for <app>** and has no reveal:
 the control plane holds only ciphertext, and only that app's private key opens it.
 
+Filters are in the URL: copy the link to share a filtered view. The app/environment/label picked in
+the topbar (`app`, `env`, `label`), the Entries search and page (`q`, `page`), the History page,
+open version and diff (`page`, `version`, `from`, `to`) and the Audit action and page (`action`,
+`page`) all live in the hash, so `/config#/history?env=staging&from=10&to=12` opens that diff, and
+back/forward step through your picks.
+
 ## The JSON API
 
 Same-origin, JSON, and the list envelopes follow the Agora list convention (`{ data, meta }`).

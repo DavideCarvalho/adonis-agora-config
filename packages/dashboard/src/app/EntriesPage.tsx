@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { parseAsInteger, parseAsString, useQueryStates } from 'nuqs';
 import { useState } from 'react';
 import { EmptyState, PageHeader, Pager, Panel, QueryBoundary } from '../agora-kit';
 import { type Column, DataTable } from '../agora-kit/blocks/data-table';
@@ -286,10 +287,19 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
   );
 }
 
+/**
+ * The Entries page's view, in the hash's query (`#/entries?q=db&page=2`). Typing the search
+ * rewrites the current history entry (and goes back to page 1); a page pick adds one.
+ */
+export const entriesParams = {
+  q: parseAsString.withDefault(''),
+  page: parseAsInteger.withDefault(1).withOptions({ history: 'push' }),
+};
+
 export function EntriesPage() {
   const { api, scope } = useConsole();
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [{ q: search, page }, setView] = useQueryStates(entriesParams);
+  const setPage = (next: number) => void setView({ page: next });
   const [editing, setEditing] = useState<Entry | 'new' | null>(null);
   const query = useQuery({
     queryKey: ['entries', scope, search, page],
@@ -315,10 +325,9 @@ export function EntriesPage() {
         action={
           <Input
             value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
+            onChange={(event) =>
+              void setView({ q: event.target.value, page: null }, { history: 'replace' })
+            }
             placeholder="Search keys…"
             className="h-8 w-52"
             aria-label="Search entries"

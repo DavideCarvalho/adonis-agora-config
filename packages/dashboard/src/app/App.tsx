@@ -1,13 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { parseAsString, useQueryStates } from 'nuqs';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIcon,
   AppShell,
   ClockIcon,
   ErrorBoundary,
   ListIcon,
+  NuqsHashAdapter,
   PageBody,
   readShellConfig,
+  splitHash,
+  subscribeHashUrl,
 } from '../agora-kit';
 import { Skeleton } from '../agora-kit/ui/skeleton';
 import { ConfigApi, type Meta, readBootstrap, type Scope } from '../client/config-client';
@@ -28,24 +32,72 @@ const PAGES: Record<Page, { title: string; render: () => ReactNode }> = {
 };
 
 function readPage(): Page {
-  const value = (typeof window === 'undefined' ? '' : window.location.hash).replace(/^#\/?/, '');
+  const hash = typeof window === 'undefined' ? '' : window.location.hash;
+  const value = splitHash(hash).path.replace(/^\/?/, '');
   return value === 'history' || value === 'audit' ? value : 'entries';
 }
 
+/** The scope picked in the topbar (`?app=…&env=…&label=…` in the hash), kept across pages. */
+const SCOPE_KEYS = ['app', 'env', 'label'] as const;
+
+/**
+ * The page is the hash's path (`#/history`); its view state (search, page, selected version) and
+ * the topbar's scope ride in the hash's query, written by nuqs through the kit's
+ * `NuqsHashAdapter`. Moving to another page keeps the scope and drops the old page's view state.
+ */
 function useRoute(): [Page, (page: Page) => void] {
   const [page, setPage] = useState<Page>(readPage);
-  useEffect(() => {
-    const onChange = () => setPage(readPage());
-    window.addEventListener('hashchange', onChange);
-    return () => window.removeEventListener('hashchange', onChange);
+  // Follows links, back/forward and query-only writes (which fire no `hashchange`).
+  useEffect(() => subscribeHashUrl(() => setPage(readPage())), []);
+  const go = useCallback((next: Page) => {
+    const current = new URLSearchParams(splitHash(window.location.hash).search);
+    const kept = new URLSearchParams();
+    for (const key of SCOPE_KEYS) {
+      const value = current.get(key);
+      if (value !== null) kept.set(key, value);
+    }
+    const query = kept.toString();
+    window.location.hash = query === '' ? `#/${next}` : `#/${next}?${query}`;
+    setPage(next);
   }, []);
-  return [
-    page,
-    (next) => {
-      window.location.hash = `#/${next}`;
-      setPage(next);
+  return [page, go];
+}
+
+const scopeParams = {
+  app: parseAsString.withOptions({ history: 'push' }),
+  env: parseAsString.withOptions({ history: 'push' }),
+  label: parseAsString.withOptions({ history: 'push' }),
+};
+
+/**
+ * The scope every page reads: the URL's pick, else the bootstrap's / the server's default. Picking
+ * the default again takes the param out of the URL, so a plain link still opens on the default.
+ */
+function useScope(defaults: Scope | null): [Scope | null, (scope: Scope) => void] {
+  const [picked, setPicked] = useQueryStates(scopeParams);
+  const scope = useMemo<Scope | null>(
+    () =>
+      defaults === null
+        ? null
+        : {
+            app: picked.app ?? defaults.app,
+            environment: picked.env ?? defaults.environment,
+            label: picked.label ?? defaults.label,
+          },
+    [defaults, picked.app, picked.env, picked.label],
+  );
+  const setScope = useCallback(
+    (next: Scope) => {
+      if (defaults === null) return;
+      void setPicked({
+        app: next.app === defaults.app ? null : next.app,
+        env: next.environment === defaults.environment ? null : next.environment,
+        label: next.label === defaults.label ? null : next.label,
+      });
     },
-  ];
+    [defaults, setPicked],
+  );
+  return [scope, setScope];
 }
 
 function LogoMark() {
@@ -118,7 +170,19 @@ function MetaScreen({ error }: { error: unknown }) {
   );
 }
 
+/**
+ * The config console, wrapped in the kit's `NuqsHashAdapter`: the scope and each page's view state
+ * live in the hash's query (`#/history?env=staging&version=12`), so a view is a link.
+ */
 export function App() {
+  return (
+    <NuqsHashAdapter>
+      <Console />
+    </NuqsHashAdapter>
+  );
+}
+
+function Console() {
   const bootstrap = useMemo(() => readBootstrap(), []);
   const shell = useMemo(() => readShellConfig('config-dashboard-config'), []);
   const api = useMemo(() => (bootstrap ? new ConfigApi(bootstrap.api) : null), [bootstrap]);
@@ -129,16 +193,18 @@ export function App() {
     enabled: api !== null,
     retry: false,
   });
-  const [scope, setScope] = useState<Scope | null>(null);
-
-  useEffect(() => {
-    if (!meta.data || scope !== null) return;
-    setScope({
-      app: bootstrap?.app ?? meta.data.default.app,
-      environment: bootstrap?.environment ?? meta.data.default.environment,
-      label: bootstrap?.label ?? meta.data.default.label,
-    });
-  }, [meta.data, scope, bootstrap]);
+  const defaults = useMemo<Scope | null>(
+    () =>
+      meta.data
+        ? {
+            app: bootstrap?.app ?? meta.data.default.app,
+            environment: bootstrap?.environment ?? meta.data.default.environment,
+            label: bootstrap?.label ?? meta.data.default.label,
+          }
+        : null,
+    [meta.data, bootstrap],
+  );
+  const [scope, setScope] = useScope(defaults);
 
   if (bootstrap === null || api === null) {
     return (
