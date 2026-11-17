@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { parseAsInteger, parseAsString, useQueryStates } from 'nuqs';
 import { EmptyState, PageHeader, Pager, Panel, QueryBoundary } from '../agora-kit';
 import { type Column, DataTable } from '../agora-kit/blocks/data-table';
 import { Badge } from '../agora-kit/ui/badge';
@@ -54,10 +54,17 @@ const columns: Column<AuditRow>[] = [
   },
 ];
 
+/** The audit trail's view, in the hash's query (`#/audit?action=reveal&page=2`). Both are explicit
+ *  picks, so each adds a history entry; a new action goes back to page 1. */
+export const auditParams = {
+  page: parseAsInteger.withDefault(1),
+  action: parseAsString.withDefault(''),
+};
+
 export function AuditPage() {
   const { api, scope } = useConsole();
-  const [page, setPage] = useState(1);
-  const [action, setAction] = useState('');
+  const [{ page, action }, setView] = useQueryStates(auditParams, { history: 'push' });
+  const setPage = (next: number) => void setView({ page: next });
   const query = useQuery({
     queryKey: ['audit', scope, page, action],
     queryFn: () => api.audit(scope, { page, size: 50, ...(action ? { action } : {}) }),
@@ -78,10 +85,7 @@ export function AuditPage() {
             aria-label="Action"
             className="h-8 rounded-md border border-border bg-panel-2 px-2 text-[11px] text-dim"
             value={action}
-            onChange={(event) => {
-              setAction(event.target.value);
-              setPage(1);
-            }}
+            onChange={(event) => void setView({ action: event.target.value, page: null })}
           >
             <option value="">every action</option>
             <option value="set">set</option>

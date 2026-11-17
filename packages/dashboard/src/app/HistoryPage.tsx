@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { parseAsInteger, useQueryStates } from 'nuqs';
 import { useState } from 'react';
 import { EmptyState, PageHeader, Pager, Panel, QueryBoundary } from '../agora-kit';
 import { type Column, DataTable } from '../agora-kit/blocks/data-table';
@@ -149,12 +150,25 @@ function RollbackDialog({ version, onClose }: { version: number; onClose: () => 
   );
 }
 
+/**
+ * The History page's view, in the hash's query (`#/history?page=2&version=12&from=10&to=12`): the
+ * versions page, the version open on the right (none = the latest) and the two versions diffed.
+ * Every one is an explicit pick, so each adds a history entry.
+ */
+export const historyParams = {
+  page: parseAsInteger.withDefault(1),
+  version: parseAsInteger,
+  from: parseAsInteger,
+  to: parseAsInteger,
+};
+
 export function HistoryPage() {
   const { api, scope } = useConsole();
-  const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [diffFrom, setDiffFrom] = useState<number | null>(null);
-  const [diffTo, setDiffTo] = useState<number | null>(null);
+  const [{ page, version: selected, from: diffFrom, to: diffTo }, setView] = useQueryStates(
+    historyParams,
+    { history: 'push' },
+  );
+  const setPage = (next: number) => void setView({ page: next });
   const [rollingBack, setRollingBack] = useState<number | null>(null);
 
   const versions = useQuery({
@@ -232,7 +246,7 @@ export function HistoryPage() {
                   columns={versionColumns}
                   rows={data.data}
                   rowKey={(version) => String(version.version)}
-                  onRowClick={(version) => setSelected(version.version)}
+                  onRowClick={(version) => void setView({ version: version.version })}
                   rowClassName={(version) =>
                     version.version === current ? 'bg-brand-soft/60' : undefined
                   }
@@ -253,10 +267,7 @@ export function HistoryPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setDiffFrom(current);
-                    setDiffTo(latest);
-                  }}
+                  onClick={() => void setView({ from: current, to: latest })}
                   disabled={latest === null}
                 >
                   Diff vs v{latest}
@@ -310,7 +321,7 @@ export function HistoryPage() {
               className="h-8 rounded-md border border-border bg-panel-2 px-2 text-[11px] text-dim"
               value={diffFrom ?? ''}
               onChange={(event) =>
-                setDiffFrom(event.target.value ? Number(event.target.value) : null)
+                void setView({ from: event.target.value ? Number(event.target.value) : null })
               }
             >
               <option value="">from…</option>
@@ -325,7 +336,7 @@ export function HistoryPage() {
               className="h-8 rounded-md border border-border bg-panel-2 px-2 text-[11px] text-dim"
               value={diffTo ?? ''}
               onChange={(event) =>
-                setDiffTo(event.target.value ? Number(event.target.value) : null)
+                void setView({ to: event.target.value ? Number(event.target.value) : null })
               }
             >
               <option value="">to…</option>
