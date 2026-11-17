@@ -45,14 +45,13 @@ async function resolveRedis(
   config: RedisTransportConfig,
 ): Promise<RedisClient> {
   if (config.client) return config.client;
-  // A non-literal specifier on purpose: `@adonisjs/redis` is an optional peer, loaded only when
-  // this driver is selected. A literal import would fail this package's `tsc` without the peer.
-  const REDIS_PACKAGE = '@adonisjs/redis/services/main';
-  const service = (await import(REDIS_PACKAGE)).default as unknown as {
+  // From the container, not `@adonisjs/redis/services/main`: that service is only filled once the
+  // app has booted, and the control plane builds its transport while providers boot (an ace command
+  // such as `migration:run` crashed on `service.connection` being undefined).
+  const redis = (await ctx.app.container.make('redis')) as {
     connection(name?: string): RedisClient;
   };
-  void ctx;
-  return service.connection(config.connection ?? 'main');
+  return redis.connection(config.connection ?? 'main');
 }
 
 /**
