@@ -60,3 +60,13 @@ describe('capabilityAllows', () => {
     expect(capabilityAllows(['', 'config:read'], 'config:read')).toBe(true);
   });
 });
+
+describe('capabilityAllows: a `*` before the last one consumes a segment', () => {
+  it('does not let a non-trailing `*` run past the end of the required capability', () => {
+    expect(capabilityAllows(['config:*:*'], 'config')).toBe(false);
+    expect(capabilityAllows(['config:*:*:*'], 'config:a')).toBe(false);
+    expect(capabilityAllows(['config:*:*'], 'config:a')).toBe(true);
+    expect(capabilityAllows(['config:*:*'], 'config:a:b')).toBe(true);
+    expect(capabilityAllows(['config:*'], 'config')).toBe(true);
+  });
+});
