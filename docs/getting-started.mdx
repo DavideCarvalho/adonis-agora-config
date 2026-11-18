@@ -101,6 +101,11 @@ export default await Env.create(new URL('../', import.meta.url), {
   client is enough: the token (`urn:agora:config`) and the server URL are found for you, and the
   app name is the token's partition. Without it, pass `token`, `url` and `partition`.
 - **No credentials:** nothing is fetched. Tests and local development keep their `.env`.
+- **Retry and fail-fast**, like Spring Cloud Config (`spring-retry`, `fail-fast`). `retry` tries
+  again with backoff, for example `{ attempts: 6, initialMs: 1000, maxMs: 5000 }`. When every
+  attempt failed and there is no snapshot, `failFast: true` fails the boot with
+  `E_REMOTE_CONFIG_UNAVAILABLE` instead of booting without the server's values. The platform
+  restarts the process, and a rolling deploy keeps the old instances serving.
 - **The server down:** the last snapshot is used (`tmp/config/snapshot.json`, `snapshotPath` to
   move it, `false` for none). Without one, the app boots on its local environment and a warning
   is printed. The boot never fails because of the config server.
