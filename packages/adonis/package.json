@@ -1,6 +1,6 @@
 {
   "name": "@adonis-agora/config",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Centralized configuration for AdonisJS apps, Spring Cloud Config style \u2014 one control plane, per-app per-environment documents with history and audit, tenants that boot from the server or a snapshot and hot-reload what can be reloaded. Part of the Agora ecosystem.",
   "license": "MIT",
   "repository": {

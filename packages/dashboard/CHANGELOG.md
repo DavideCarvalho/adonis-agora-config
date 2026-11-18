@@ -1,5 +1,11 @@
 # @adonis-agora/config-dashboard
 
+## 0.3.2
+
+### Patch Changes
+
+- [#20](https://github.com/DavideCarvalho/adonis-agora-config/pull/20) [`6047728`](https://github.com/DavideCarvalho/adonis-agora-config/commit/6047728df7a6aee72de39c6827887c3958ed5dbf) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Console scope pickers with autocomplete (the kit's new `ComboSelect`): app, env and label in the topbar filter as you type, and a name `/meta` doesn't list yet (a scope with no entries) can be typed and picked.
+
 ## 0.3.1
 
 ### Patch Changes
