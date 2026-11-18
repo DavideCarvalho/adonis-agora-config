@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.9.0
+
+### Minor Changes
+
+- [#25](https://github.com/DavideCarvalho/adonis-agora-config/pull/25) [`2c55d30`](https://github.com/DavideCarvalho/adonis-agora-config/commit/2c55d30a9536f18ccc8c175f7848fdf752688cb0) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `node ace config:import [--file] [--secrets] [--skip] [--dry-run]` imports env variables into entries in one version. The input can be a `.env`, a JSON object or stdin. `RESEND_API_KEY` becomes `resend.api.key`, values are kept as text, and names matching the secret pattern are stored as secrets. The command never prints a value. New `ConfigAdmin.setEntries()` writes several entries in one version.
+
 ## 0.8.0
 
 ### Minor Changes
