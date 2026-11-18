@@ -126,6 +126,8 @@ added to `.gitignore`.
 
 - `config:read` is enough for everything except secret values; give `config:secrets:read` only to
   apps that truly need them.
+- `config:*` (or `*`) grants every config capability, secrets included; prefer the explicit
+  capabilities unless the app really needs all of them.
 - The console and CLI use the console gate, not a service token.
 - A token is never stored: the source caches it in memory until shortly before `exp`, and the
   control plane closes streams when it expires.

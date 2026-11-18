@@ -169,6 +169,41 @@ describe('control plane', () => {
     expect(revealed.entries['missing.key'].value).toBeUndefined();
   });
 
+  it('accepts wildcard capabilities: config:* and * cover reads and secrets', async () => {
+    const store = memoryConfig();
+    await seedConfig(store, testScope, [
+      ['site.name', 'Shop'],
+      { key: 'db.password', value: 'hunter2', secret: true },
+    ]);
+    const grants: Record<string, string[]> = {
+      family: ['config:*'],
+      all: ['*'],
+      reader: ['config:read'],
+      unrelated: ['flags:*'],
+    };
+    const verifyTenant: TenantVerifier = async ({ token }) =>
+      grants[token] ? { partition: 'shop', capabilities: grants[token] } : null;
+    const { base } = await start(store, verifyTenant);
+
+    for (const token of ['family', 'all']) {
+      const response = await fetch(`${base}/v1/config`, { headers: auth(token) });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.entries['site.name'].value).toBe('Shop');
+      expect(body.entries['db.password']).toMatchObject({ value: 'hunter2', masked: false });
+    }
+
+    // `config:read` alone still reads, with the secret masked: nothing is implied.
+    const masked = await (await fetch(`${base}/v1/config`, { headers: auth('reader') })).json();
+    expect(masked.entries['site.name'].value).toBe('Shop');
+    expect(masked.entries['db.password']).toMatchObject({ masked: true });
+    expect(masked.entries['db.password'].value).toBeUndefined();
+
+    const refused = await fetch(`${base}/v1/config`, { headers: auth('unrelated') });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: 'token lacks the config:read capability' });
+  });
+
   it('whoami says what the token is', async () => {
     const store = memoryConfig();
     const { base } = await start(store, sharedSecretVerifier({ partitions: { shop: 's' } }));

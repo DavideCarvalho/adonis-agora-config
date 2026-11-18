@@ -64,6 +64,33 @@ Claims the control plane reads:
 | `capabilities` | `config:read`, optionally `config:secrets:read` |
 | `exp` | every stream opened with the token closes at expiry |
 
+### Capabilities
+
+| Capability | Grants |
+| --- | --- |
+| `config:read` | every endpoint; secret values come back masked |
+| `config:secrets:read` | secret values, unmasked (`config:read` is still required) |
+| `config:write` | reserved for writes through the admin API |
+
+Wildcards are accepted. A `*` segment matches one segment, and a trailing `*` matches whatever
+follows, including nothing (`config:secrets:*` also covers `config:secrets`):
+
+| Granted | Covers |
+| --- | --- |
+| `config:*` | every config capability, **secrets included** |
+| `config:secrets:*` | `config:secrets:read` |
+| `*` | everything |
+
+Nothing else is implied: `config:read` never grants `config:secrets:read`. To check a capability the
+same way in your own code, use `capabilityAllows`:
+
+```ts
+import { capabilityAllows } from '@adonis-agora/config'
+
+capabilityAllows(['config:*'], 'config:secrets:read') // true
+capabilityAllows(['config:read'], 'config:secrets:read') // false
+```
+
 An app's identity in the token is also what the audit trail records: the actor is the token's `act`
 claim when the call is an RFC 8693 exchange, else its `sub`.
 

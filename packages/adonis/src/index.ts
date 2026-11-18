@@ -12,6 +12,7 @@ export {
   type ConfigSealedTo,
   type ConfigSnapshot,
   type ConfigValue,
+  capabilityAllows,
   DEFAULT_ENVIRONMENT,
   DEFAULT_LABEL,
   diffDocuments,
