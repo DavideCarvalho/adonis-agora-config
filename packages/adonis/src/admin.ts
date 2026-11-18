@@ -268,6 +268,55 @@ export class ConfigAdmin {
   }
 
   /**
+   * Several entries in ONE version (an import): one write, one change announced, one audit row
+   * per key. Values only (no vault, no sealing). Keys that already hold the same value and flags
+   * do not make a new version on their own.
+   */
+  async setEntries(
+    scope: ConfigScope,
+    entries: Array<{ key: string; value: ConfigValue; secret?: boolean }>,
+    options: SetEntryOptions,
+  ): Promise<{ version: number; changed: boolean }> {
+    if (entries.length === 0) {
+      const current = await this.store.read(scope);
+      return { version: current?.version ?? 0, changed: false };
+    }
+    const result = await this.store.write(
+      scope,
+      entries.map((entry) => ({
+        key: entry.key,
+        value: entry.value as never,
+        ...(entry.secret === true ? { secret: true } : {}),
+      })),
+      {
+        actor: options.actor,
+        now: options.now ?? new Date().toISOString(),
+        ...(options.message !== undefined ? { message: options.message } : {}),
+      },
+    );
+    if (result.changed) {
+      this.#onChange?.(scope, result.document.version);
+      this.#announce(scope, result.document.version, result.document);
+      for (const entry of entries) {
+        const stored = result.document.entries[entry.key];
+        if (!stored) continue;
+        emitConfig('entry.set', {
+          app: result.document.app,
+          environment: result.document.environment,
+          label: result.document.label,
+          key: entry.key,
+          version: result.document.version,
+          actor: options.actor,
+          secret: stored.secret,
+          reloadable: stored.reloadable,
+          ...(options.message !== undefined ? { message: options.message } : {}),
+        });
+      }
+    }
+    return { version: result.document.version, changed: result.changed };
+  }
+
+  /**
    * Turns `sealedTo: true` into ciphertext for the scope app's active public key. The plaintext
    * never reaches the store, and there is no way back: the control plane cannot open the result.
    */

@@ -13,6 +13,7 @@ import {
   ConfigVersionShow,
 } from './config.js';
 import ConfigCryptoReseal from './crypto.js';
+import ConfigImport from './import.js';
 import ConfigPull from './pull.js';
 import ConfigSyncCommand from './sync.js';
 import ConfigTenantKey from './tenant_key.js';
@@ -33,6 +34,7 @@ const loader = new ListLoader([
   ConfigRollback,
   ConfigAudit,
   ConfigEnv,
+  ConfigImport,
   ConfigPull,
   ConfigSyncCommand,
   ConfigCryptoReseal,
