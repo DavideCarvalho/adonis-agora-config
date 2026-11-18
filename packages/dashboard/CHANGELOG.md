@@ -1,5 +1,11 @@
 # @adonis-agora/config-dashboard
 
+## 0.3.3
+
+### Patch Changes
+
+- [#21](https://github.com/DavideCarvalho/adonis-agora-config/pull/21) [`bdf345d`](https://github.com/DavideCarvalho/adonis-agora-config/commit/bdf345d04ceca6aed28a56752b662563a4fc4424) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Console: creatable comboboxes keep the typed text when you leave the field, and server-side suggestions no longer wipe what you are typing.
+
 ## 0.3.2
 
 ### Patch Changes
