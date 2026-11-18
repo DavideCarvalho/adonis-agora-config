@@ -296,7 +296,7 @@ export class ConfigRollback extends ConfigCommand {
   }
 }
 
-/** `node ace config:version:show 3 --application=shop`. */
+/** `node ace config:version:show 3 --app=shop`. */
 export class ConfigVersionShow extends ConfigCommand {
   static override commandName = 'config:version:show';
   static override description = 'Show one version exactly as it was';
@@ -332,7 +332,7 @@ export class ConfigVersionShow extends ConfigCommand {
   }
 }
 
-/** `node ace config:diff --from=1 --to=3 --application=shop`. */
+/** `node ace config:diff --from=1 --to=3 --app=shop`. */
 export class ConfigDiff extends ConfigCommand {
   static override commandName = 'config:diff';
   static override description = 'Show the changes between two versions';
@@ -382,7 +382,7 @@ export class ConfigDiff extends ConfigCommand {
   }
 }
 
-/** `node ace config:audit --application=shop --action=reveal`. */
+/** `node ace config:audit --app=shop --action=reveal`. */
 export class ConfigAudit extends ConfigCommand {
   static override commandName = 'config:audit';
   static override description = 'Show the audit trail of a scope, newest first';

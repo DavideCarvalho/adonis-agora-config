@@ -41,10 +41,12 @@ export abstract class ConfigCommand extends BaseCommand {
   static override options: CommandOptions = { startApp: true };
 
   @flags.string({
-    description: 'Application (partition). Default: the first app in the store',
-    alias: 'a',
+    flagName: 'app',
+    description:
+      'The app (partition). Default: the first app in the store. `--application` still works.',
+    alias: ['a', 'application'],
   })
-  declare application?: string;
+  declare appName?: string;
 
   @flags.string({ description: 'Environment. Default: this process environment' })
   declare environment?: string;
@@ -63,7 +65,7 @@ export abstract class ConfigCommand extends BaseCommand {
   protected async scope(): Promise<ConfigScope> {
     const runtime = getRuntime();
     return {
-      app: this.application ?? runtime.app ?? (await this.firstApp()),
+      app: this.appName ?? runtime.app ?? (await this.firstApp()),
       environment: this.environment ?? runtime.environment,
       label: this.label ?? DEFAULT_LABEL,
     };

@@ -124,7 +124,7 @@ export default class ConfigTenantKey extends ConfigCommand {
 
   /** Control plane/standalone: the public keys an app registered (never a private key). */
   async #listServerKeys(runtime: ReturnType<typeof getRuntime>): Promise<void> {
-    const app = this.application ?? runtime.app;
+    const app = this.appName ?? runtime.app;
     if (!app) {
       this.logger.error(
         'pass --app=<name> (a control plane has no app of its own to list keys for)',

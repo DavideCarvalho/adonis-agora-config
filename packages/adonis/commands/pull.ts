@@ -11,7 +11,7 @@ import type { TenantTokenSource } from '../src/topology/token.js';
 import { cliActor } from './shared.js';
 
 /**
- * `node ace config:pull --application=shop --write=.env.local` — the bridge between the config
+ * `node ace config:pull --app=shop --write=.env.local` — the bridge between the config
  * server and the shell/Sail:
  *
  * - on a control plane/standalone it reads the store directly;
@@ -28,10 +28,12 @@ export default class ConfigPull extends BaseCommand {
   static override options: CommandOptions = { startApp: true };
 
   @flags.string({
-    description: 'Application (partition). Default: this app, else CONFIG_APP',
-    alias: 'a',
+    flagName: 'app',
+    description:
+      'The app (partition). Default: this app, else CONFIG_APP. `--application` still works.',
+    alias: ['a', 'application'],
   })
-  declare application?: string;
+  declare appName?: string;
 
   @flags.string({ description: 'Environment. Default: this process, else NODE_ENV' })
   declare environment?: string;
@@ -74,9 +76,9 @@ export default class ConfigPull extends BaseCommand {
 
   override async run(): Promise<void> {
     const runtime = hasRuntime() ? getRuntime() : undefined;
-    const application = this.application ?? runtime?.app ?? process.env.CONFIG_APP;
+    const application = this.appName ?? runtime?.app ?? process.env.CONFIG_APP;
     if (!application) {
-      this.logger.error('pass --application (or CONFIG_APP)');
+      this.logger.error('pass --app (or CONFIG_APP)');
       this.exitCode = 1;
       return;
     }

@@ -105,7 +105,7 @@ export AUTHKIT_CLIENT_ID=streaming
 export AUTHKIT_CLIENT_SECRET=…
 export CONFIG_URL=https://config.example.com/_config
 
-node ace config:pull --application=streaming --write=.env.local
+node ace config:pull --app=streaming --write=.env.local
 ```
 
 It uses `authkitTenantToken` from authkit-client (the CLI imports it lazily) and writes only the
@@ -114,7 +114,7 @@ It uses `authkitTenantToken` from authkit-client (the CLI imports it lazily) and
 into varlock, `eval`, or a secret manager):
 
 ```sh
-set -a; eval "$(node ace config:pull --application=streaming)"; set +a
+set -a; eval "$(node ace config:pull --app=streaming)"; set +a
 varlock run -- node ace serve --hmr
 ```
 

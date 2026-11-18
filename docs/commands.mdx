@@ -8,17 +8,17 @@ The commands call the same `ConfigAdmin` service the console and the MCP tools u
 same masking, same versions, and `cli:<os user>` as the audit actor.
 
 ```sh
-node ace config:entry:list --application=streaming --environment=production
-node ace config:entry:get db.host --application=streaming
+node ace config:entry:list --app=streaming --environment=production
+node ace config:entry:get db.host --app=streaming
 node ace config:entry:set checkout.timeoutMs 3000 --reloadable --message="tune checkout"
 node ace config:entry:unset legacy.flag --force
-node ace config:history --application=streaming
-node ace config:version:show 4 --application=streaming
-node ace config:diff --from=3 --to=4 --application=streaming
+node ace config:history --app=streaming
+node ace config:version:show 4 --app=streaming
+node ace config:diff --from=3 --to=4 --app=streaming
 node ace config:rollback --to=4 --force --message="revert the pool change"
-node ace config:audit --application=streaming --action=reveal
-node ace config:env --application=streaming
-node ace config:pull --application=streaming --write=.env.local
+node ace config:audit --app=streaming --action=reveal
+node ace config:env --app=streaming
+node ace config:pull --app=streaming --write=.env.local
 node ace config:crypto:reseal --dry-run
 node ace config:tenant:key --rotate
 ```
@@ -37,9 +37,9 @@ node ace config:tenant:key --rotate
 | `config:env` | the resolved values as `KEY=value`, for `eval`/pipes; `--secrets` (audited), `--prefix` |
 | `config:pull` | writes the managed `.env.local` block (or prints without `--write`); `--url`, `--token`, authkit flags, `--secrets` (audited) |
 | `config:crypto:reseal` | re-seals values with the active key; `--all` (after rotating `config/encryption.ts`), `--dry-run`, `--json` |
-| `config:tenant:key` | the tenant's X25519 key for sealed secrets: show, `--rotate`, `--reseal`, `--dry-run`; on a server, list an app's public keys with `--application` |
+| `config:tenant:key` | the tenant's X25519 key for sealed secrets: show, `--rotate`, `--reseal`, `--dry-run`; on a server, list an app's public keys with `--app` |
 
-Every command takes `--application`, `--environment` and `--label` (defaults: the app in the
+Every command takes `--app`, `--environment` and `--label` (defaults: the app in the
 runtime, the process environment, `main`) and `--json`. A failure sets exit code 1 and writes the
 reason to stderr.
 
@@ -59,14 +59,14 @@ node ace config:entry:set stripe.secret --vault='vault://aws/prod/streaming#stri
 `--json` prints one object to stdout, nothing else:
 
 ```sh
-node ace config:entry:list --application=streaming --json | jq '.data[].key'
-node ace config:history --application=streaming --json | jq '.meta.total'
+node ace config:entry:list --app=streaming --json | jq '.data[].key'
+node ace config:history --app=streaming --json | jq '.meta.total'
 ```
 
 `config:env` mirrors `sail:info --env`, so a shell can export the whole scope:
 
 ```sh
-eval "$(node ace config:env --application=streaming)"
+eval "$(node ace config:env --app=streaming)"
 ```
 
 ## In a worktree

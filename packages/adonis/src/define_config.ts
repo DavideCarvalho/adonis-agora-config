@@ -69,7 +69,7 @@ export interface StandaloneConfig extends BaseConfig {
   topology?: 'standalone';
   /**
    * This app's name (the partition). Default on a standalone: `APP_NAME` when set; otherwise the
-   * runtime has no default app and the console/CLI ask for one (`--application`). A tenant always
+   * runtime has no default app and the console/CLI ask for one (`--app`). A tenant always
    * takes its `tenant.partition`.
    */
   app?: string;

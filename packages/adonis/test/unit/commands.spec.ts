@@ -80,7 +80,7 @@ describe('commands', () => {
     return { instance, json: () => JSON.parse(writes.join('')) };
   }
 
-  const scopeFlags = ['--application=shop', '--environment=production'];
+  const scopeFlags = ['--app=shop', '--environment=production'];
 
   async function seed(): Promise<void> {
     await run(ConfigEntrySet as never, [
@@ -105,6 +105,19 @@ describe('commands', () => {
       '--json',
     ]);
   }
+
+  it('picks the app with --app, and still with --application and -a', async () => {
+    await seed();
+    for (const flag of ['--app=shop', '--application=shop', '-a=shop']) {
+      const list = await run(ConfigEntryList as never, [
+        flag,
+        '--environment=production',
+        '--json',
+      ]);
+      list.instance.assertSucceeded();
+      expect(list.json().meta.total, flag).toBe(3);
+    }
+  });
 
   it('sets, lists, gets, reveals and unsets entries', async () => {
     const set = await run(ConfigEntrySet as never, [
@@ -235,7 +248,7 @@ describe('commands', () => {
     );
 
     const pull = await run(ConfigPull as never, [
-      '--application=shop',
+      '--app=shop',
       '--environment=production',
       '--write=.env.local',
       '--json',
@@ -258,7 +271,7 @@ describe('commands', () => {
     expect(readFileSync(join(root, '.gitignore'), 'utf8')).toContain('.env.local');
 
     const again = await run(ConfigPull as never, [
-      '--application=shop',
+      '--app=shop',
       '--environment=production',
       '--write=.env.local',
       '--json',
@@ -267,7 +280,7 @@ describe('commands', () => {
     expect(readFileSync(join(root, '.env.local'), 'utf8')).toBe(file);
 
     await run(ConfigPull as never, [
-      '--application=shop',
+      '--app=shop',
       '--environment=production',
       '--write=.env.remote',
       '--secrets',
@@ -281,7 +294,7 @@ describe('commands', () => {
     const root = app.makePath();
     writeFileSync(join(root, '.env.local'), 'SECRET=varlock(local:abc)\n');
     const pull = await run(ConfigPull as never, [
-      '--application=shop',
+      '--app=shop',
       '--environment=production',
       '--write=.env.local',
       '--json',
@@ -293,7 +306,7 @@ describe('commands', () => {
   it('prints KEY=value without --write and can fetch from a remote control plane', async () => {
     await seed();
     const local = await run(ConfigPull as never, [
-      '--application=shop',
+      '--app=shop',
       '--environment=production',
       '--json',
     ]);
@@ -323,7 +336,7 @@ describe('commands', () => {
     const server: Server = await serve(routes);
     try {
       const remote = await run(ConfigPull as never, [
-        '--application=billing',
+        '--app=billing',
         '--environment=production',
         `--url=${addressOf(server)}/_config`,
         '--token=billing-secret',
@@ -411,7 +424,7 @@ describe('commands', () => {
     });
     expect(entry.value).toBeUndefined();
 
-    const keys = await run(ConfigTenantKey as never, ['--application=shop', '--json']);
+    const keys = await run(ConfigTenantKey as never, ['--app=shop', '--json']);
     const body = keys.json();
     expect(body.app).toBe('shop');
     expect(body.keys).toHaveLength(1);

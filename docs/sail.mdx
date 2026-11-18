@@ -63,7 +63,7 @@ export CONFIG_URL=https://config.example.com/_config
 export AUTHKIT_ISSUER=https://auth.example.com
 export AUTHKIT_CLIENT_ID=streaming
 export AUTHKIT_CLIENT_SECRET=…
-node ace config:pull --application=streaming --write=.env.local
+node ace config:pull --app=streaming --write=.env.local
 ```
 
 The command uses `authkitTenantToken` from `@adonis-agora/authkit-client` (lazy import) with the
@@ -83,7 +83,7 @@ config.get('db.port')   // 5789 in this worktree, whatever the server says
 config.status()         // where the values came from, and whether localEnv is on
 ```
 
-`node ace sail:info --env` and `node ace config:env --application=<app>` agree on every key Sail
+`node ace sail:info --env` and `node ace config:env --app=<app>` agree on every key Sail
 owns. A key only the config server has simply keeps the server's value.
 
 ## Tests
