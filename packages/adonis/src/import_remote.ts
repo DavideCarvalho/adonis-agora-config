@@ -38,8 +38,40 @@ export interface ImportRemoteConfigOptions {
    * against the app root. Default `tmp/config/snapshot.json`; `false` keeps none.
    */
   snapshotPath?: string | false | undefined;
-  /** How long the first fetch may take. Default 5000 ms. */
+  /** How long each fetch may take. Default 5000 ms. */
   timeoutMs?: number | undefined;
+  /**
+   * Try again before giving up, like Spring Cloud Config's `spring-retry`: `attempts` fetches in
+   * all, waiting `initialMs`, then × `multiplier`, capped at `maxMs`. Default: one attempt.
+   */
+  retry?: ImportRetryOptions | undefined;
+  /**
+   * When every attempt failed and there is no snapshot, fail the boot (throw) instead of booting
+   * on the local environment, like `spring.cloud.config.fail-fast`. The platform restarts the
+   * process, and a rolling deploy keeps the old instances serving. Default `false`.
+   */
+  failFast?: boolean | undefined;
+}
+
+export interface ImportRetryOptions {
+  /** Fetches in all, the first included. Default 6. */
+  attempts?: number;
+  /** Wait before the second attempt. Default 1000 ms. */
+  initialMs?: number;
+  /** Each wait is the previous × this. Default 1.5. */
+  multiplier?: number;
+  /** Longest wait. Default 5000 ms. */
+  maxMs?: number;
+}
+
+/** The config server could not be reached, there was no snapshot, and `failFast` is on. */
+export class RemoteConfigUnavailableError extends Error {
+  readonly code = 'E_REMOTE_CONFIG_UNAVAILABLE';
+  constructor(attempts: number) {
+    super(
+      `[@adonis-agora/config] the config server did not answer after ${attempts} attempt${attempts === 1 ? '' : 's'} and there is no snapshot (failFast is on)`,
+    );
+  }
 }
 
 export interface ImportRemoteConfigResult {
@@ -128,7 +160,20 @@ export async function importRemoteConfig(
     onError: (error) =>
       warn(`config server: ${error instanceof Error ? error.message : String(error)}`),
   });
-  await withTimeout(client.start(), resolved.timeoutMs ?? 5000);
+  const timeoutMs = resolved.timeoutMs ?? 5000;
+  const attempts = resolved.retry ? Math.max(1, resolved.retry.attempts ?? 6) : 1;
+  let wait = resolved.retry?.initialMs ?? 1000;
+  // Retry the fetch itself first; `start()` then loads (a snapshot as the last resort) and keeps it fresh.
+  for (let attempt = 1; attempt < attempts; attempt++) {
+    if (await withTimeoutResult(client.refresh(), timeoutMs, false)) break;
+    await sleep(wait);
+    wait = Math.min(wait * (resolved.retry?.multiplier ?? 1.5), resolved.retry?.maxMs ?? 5000);
+  }
+  await withTimeout(client.start(), timeoutMs);
+  if (resolved.failFast === true && client.status().source === 'none') {
+    await client.stop();
+    throw new RemoteConfigUnavailableError(attempts);
+  }
   setTenantBootstrap(
     tenantBootstrapKey({
       url,
@@ -159,6 +204,26 @@ export async function importRemoteConfig(
 
 function warn(message: string): void {
   process.emitWarning(`[@adonis-agora/config] ${message}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** `promise`'s value, or `fallback` after `ms`. */
+async function withTimeoutResult<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.catch(() => fallback),
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function withTimeout(promise: Promise<void>, ms: number): Promise<void> {

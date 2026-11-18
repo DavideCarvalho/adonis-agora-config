@@ -56,6 +56,11 @@ export async function bootstrapConfig(options: BootstrapOptions): Promise<Bootst
 export type {
   ImportRemoteConfigOptions,
   ImportRemoteConfigResult,
+  ImportRetryOptions,
   LocalEnv,
 } from './import_remote.js';
-export { CONFIG_RESOURCE, importRemoteConfig } from './import_remote.js';
+export {
+  CONFIG_RESOURCE,
+  importRemoteConfig,
+  RemoteConfigUnavailableError,
+} from './import_remote.js';
