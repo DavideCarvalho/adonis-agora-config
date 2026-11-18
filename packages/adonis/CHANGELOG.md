@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.10.0
+
+### Minor Changes
+
+- [#26](https://github.com/DavideCarvalho/adonis-agora-config/pull/26) [`20ede4a`](https://github.com/DavideCarvalho/adonis-agora-config/commit/20ede4a348074935bb69dddf814b70fd07e0fc41) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `importRemoteConfig` gains `retry` (attempts with backoff, like `spring-retry`) and `failFast` (like `spring.cloud.config.fail-fast`). When every attempt failed and there is no snapshot, `failFast` makes the boot throw `RemoteConfigUnavailableError` (`E_REMOTE_CONFIG_UNAVAILABLE`) instead of booting on the local environment.
+
 ## 0.9.0
 
 ### Minor Changes
