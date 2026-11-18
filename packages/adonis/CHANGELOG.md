@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.7.0
+
+### Minor Changes
+
+- [#23](https://github.com/DavideCarvalho/adonis-agora-config/pull/23) [`13c6cd1`](https://github.com/DavideCarvalho/adonis-agora-config/commit/13c6cd194bc48922735fbbba27a16636b2d32dda) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - The CLI's app flag is now `--app`, like the rest of the Agora libs (`node ace config:entry:set checkout.timeoutMs 5000 --app=shop`). `--application` and `-a` keep working.
+
 ## 0.6.0
 
 ### Minor Changes
