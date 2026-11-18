@@ -1,3 +1,4 @@
+export { capabilityAllows } from './capabilities.js';
 export { diffDocuments, diffSummary } from './diff.js';
 export { canonicalJson, documentValues, flattenObject, unflattenObject } from './json.js';
 export {
@@ -35,7 +36,10 @@ export type {
 } from './types.js';
 export { etagMatches, etagOf, fingerprintOf } from './version.js';
 
-/** The scopes a tenant token may carry. The product resource is `urn:agora:config`. */
+/**
+ * The scopes a tenant token may carry. The product resource is `urn:agora:config`. Check them with
+ * `capabilityAllows`: a granted `config:*` or `*` covers every one of them.
+ */
 export const CONFIG_SCOPES = {
   /** Read the app's configuration. */
   read: 'config:read',

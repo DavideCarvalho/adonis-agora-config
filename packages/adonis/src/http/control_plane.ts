@@ -6,6 +6,7 @@ import {
   type ConfigDocumentView,
   type ConfigEntryView,
   type ConfigScope,
+  capabilityAllows,
   DEFAULT_LABEL,
   etagMatches,
   etagOf,
@@ -180,7 +181,7 @@ export class ControlPlane {
       ctx.response.status(401).send({ error: 'unauthorized' });
       return null;
     }
-    if (!verified.capabilities.includes(required)) {
+    if (!capabilityAllows(verified.capabilities, required)) {
       ctx.response.status(403).send({ error: `token lacks the ${required} capability` });
       return null;
     }
@@ -240,7 +241,7 @@ export class ControlPlane {
 
   async #snapshot(scope: ConfigScope, verified: VerifiedTenant) {
     const document = await this.options.store.read(scope);
-    const canReadSecrets = verified.capabilities.includes(CONFIG_SCOPES.secretsRead);
+    const canReadSecrets = capabilityAllows(verified.capabilities, CONFIG_SCOPES.secretsRead);
     if (!document) {
       return {
         view: {
@@ -298,7 +299,7 @@ export class ControlPlane {
       version: view.version,
       actor: verified.clientId ?? verified.partition,
       entries: Object.keys(view.entries).length,
-      secrets: verified.capabilities.includes(CONFIG_SCOPES.secretsRead),
+      secrets: capabilityAllows(verified.capabilities, CONFIG_SCOPES.secretsRead),
     });
     return ctx.response.json(view);
   }
