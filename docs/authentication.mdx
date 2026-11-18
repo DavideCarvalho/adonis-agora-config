@@ -72,7 +72,8 @@ Claims the control plane reads:
 | `config:secrets:read` | secret values, unmasked (`config:read` is still required) |
 | `config:write` | reserved for writes through the admin API |
 
-Wildcards are accepted. A `*` segment matches one segment, and a trailing `*` matches the rest:
+Wildcards are accepted. A `*` segment matches one segment, and a trailing `*` matches whatever
+follows, including nothing (`config:secrets:*` also covers `config:secrets`):
 
 | Granted | Covers |
 | --- | --- |

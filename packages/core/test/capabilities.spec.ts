@@ -23,15 +23,19 @@ describe('capabilityAllows', () => {
 
   it('never lets `config:*` match another product', () => {
     expect(capabilityAllows(['config:*'], 'flags:read')).toBe(false);
-    expect(capabilityAllows(['config:*'], 'config')).toBe(false);
+    expect(capabilityAllows(['config:*'], 'flags')).toBe(false);
   });
 
-  it('matches a trailing `*` on one or more further segments', () => {
+  it('matches a trailing `*` on zero or more further segments', () => {
     expect(capabilityAllows(['config:secrets:*'], 'config:secrets:read')).toBe(true);
     expect(capabilityAllows(['config:secrets:*'], 'config:secrets:read:all')).toBe(true);
     expect(capabilityAllows(['config:secrets:*'], 'config:read')).toBe(false);
-    // The trailing `*` covers at least one segment: it never matches the bare prefix.
-    expect(capabilityAllows(['config:secrets:*'], 'config:secrets')).toBe(false);
+  });
+
+  it('lets a trailing `*` match zero further segments (the bare prefix)', () => {
+    expect(capabilityAllows(['config:secrets:*'], 'config:secrets')).toBe(true);
+    expect(capabilityAllows(['config:*'], 'config')).toBe(true);
+    expect(capabilityAllows(['config:secrets:*'], 'config')).toBe(false);
   });
 
   it('lets a middle `*` match exactly one segment', () => {
