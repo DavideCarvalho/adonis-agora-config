@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.5.1
+
+### Patch Changes
+
+- [#19](https://github.com/DavideCarvalho/adonis-agora-config/pull/19) [`9f1a596`](https://github.com/DavideCarvalho/adonis-agora-config/commit/9f1a59689a40e754d8639faa4d5de9e95c96480d) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Console ⌘K: arrow keys now visibly move the selection. The highlighted item was styled with a bare `data-selected:` (cmdk marks every item `true` or `false`) and with the dialog's own surface color, so moving looked like nothing happened.
+
 ## 0.5.0
 
 ### Minor Changes
