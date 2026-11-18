@@ -5,6 +5,7 @@ import {
   ActivityIcon,
   AppShell,
   ClockIcon,
+  ComboSelect,
   ErrorBoundary,
   ListIcon,
   NuqsHashAdapter,
@@ -115,7 +116,11 @@ function LogoMark() {
   );
 }
 
-function Select({
+/**
+ * A topbar scope picker: a select with autocomplete over `/meta`'s list. `/meta` only lists scopes
+ * that hold something, so a name outside it can be typed (to open a still-empty scope).
+ */
+function ScopePicker({
   label,
   value,
   options,
@@ -126,21 +131,26 @@ function Select({
   options: readonly string[];
   onChange: (value: string) => void;
 }) {
+  const id = `config-scope-${label}`;
   return (
-    <label className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-faint">
+    <label
+      htmlFor={id}
+      className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-faint"
+    >
       {label}
-      <select
+      <ComboSelect
+        id={id}
         aria-label={label}
-        className="h-7 rounded-md border border-border bg-panel-2 px-1.5 text-[11.5px] font-normal normal-case tracking-normal text-dim"
+        className="h-7 w-36 font-normal normal-case tracking-normal text-[11.5px]"
+        options={options}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        creatable
+        clearable={false}
+        onValueChange={(next) => {
+          const picked = next?.trim();
+          if (picked && picked !== value) onChange(picked);
+        }}
+      />
     </label>
   );
 }
@@ -278,19 +288,19 @@ function Console() {
         title={CurrentPage.title}
         actions={
           <>
-            <Select
+            <ScopePicker
               label="app"
               value={scope.app}
               options={[...new Set([...meta.data.apps, scope.app])]}
               onChange={(app) => setScope({ ...scope, app })}
             />
-            <Select
+            <ScopePicker
               label="env"
               value={scope.environment}
               options={environments}
               onChange={(environment) => setScope({ ...scope, environment })}
             />
-            <Select
+            <ScopePicker
               label="label"
               value={scope.label}
               options={labels}

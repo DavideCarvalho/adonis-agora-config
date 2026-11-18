@@ -101,6 +101,22 @@ function renderApp() {
   );
 }
 
+/** Opens a kit combobox (Base UI opens on ArrowDown in jsdom), types, and picks an option. */
+async function pickCombo(label: string, text: string, option: string | RegExp = text) {
+  const input = screen.getByRole('combobox', { name: label });
+  await act(async () => {
+    input.focus();
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.change(input, { target: { value: text } });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+  const item = await screen.findByRole('option', { name: option });
+  await act(async () => {
+    fireEvent.click(item);
+    await new Promise((r) => setTimeout(r, 20));
+  });
+}
+
 const lastEntriesQuery = () =>
   new URL(urls.filter((u) => u.includes('/entries')).at(-1) ?? '/', 'http://x').searchParams;
 
@@ -113,7 +129,9 @@ describe('the config console: view state in the URL', () => {
     expect(query.get('environment')).toBe('staging');
     expect(query.get('search')).toBe('db');
     expect(query.get('page')).toBe('2');
-    expect((screen.getByLabelText('env') as HTMLSelectElement).value).toBe('staging');
+    expect((screen.getByRole('combobox', { name: 'env' }) as HTMLInputElement).value).toBe(
+      'staging',
+    );
     expect((screen.getByLabelText('Search entries') as HTMLInputElement).value).toBe('db');
   });
 
@@ -140,7 +158,7 @@ describe('the config console: view state in the URL', () => {
     window.history.replaceState(null, '', '/config#/entries?q=db');
     renderApp();
     await screen.findByText('key-p1');
-    fireEvent.change(screen.getByLabelText('env'), { target: { value: 'staging' } });
+    await pickCombo('env', 'stag', 'staging');
     await waitFor(() => expect(window.location.hash).toBe('#/entries?q=db&env=staging'));
     await waitFor(() => expect(lastEntriesQuery().get('environment')).toBe('staging'));
 
@@ -151,7 +169,7 @@ describe('the config console: view state in the URL', () => {
     fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'reveal' } });
     await waitFor(() => expect(window.location.hash).toBe('#/audit?env=staging&action=reveal'));
 
-    fireEvent.change(screen.getByLabelText('env'), { target: { value: 'production' } });
+    await pickCombo('env', 'prod', 'production');
     await waitFor(() => expect(window.location.hash).toBe('#/audit?action=reveal'));
   });
 
@@ -177,5 +195,24 @@ describe('the config console: view state in the URL', () => {
     fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'reveal' } });
     await waitFor(() => expect(window.location.hash).toBe('#/audit?action=reveal'));
     expect(lastAudit().get('after')).toBeNull();
+  });
+
+  it('app, env and label pick from `/meta` and take a typed name for an empty scope', async () => {
+    window.history.replaceState(null, '', '/config#/entries');
+    renderApp();
+    await screen.findByText('key-p1');
+    await pickCombo('app', 'bill', 'billing');
+    await waitFor(() => expect(window.location.hash).toBe('#/entries?app=billing'));
+    await waitFor(() => expect(lastEntriesQuery().get('app')).toBe('billing'));
+
+    await pickCombo('label', 'canary', 'Use “canary”');
+    await waitFor(() => expect(window.location.hash).toBe('#/entries?app=billing&label=canary'));
+    await waitFor(() => expect(lastEntriesQuery().get('label')).toBe('canary'));
+
+    await pickCombo('env', 'qa', 'Use “qa”');
+    await waitFor(() =>
+      expect(window.location.hash).toBe('#/entries?app=billing&label=canary&env=qa'),
+    );
+    expect(lastEntriesQuery().get('environment')).toBe('qa');
   });
 });
