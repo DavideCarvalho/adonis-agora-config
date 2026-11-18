@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.8.0
+
+### Minor Changes
+
+- [#24](https://github.com/DavideCarvalho/adonis-agora-config/pull/24) [`871434f`](https://github.com/DavideCarvalho/adonis-agora-config/commit/871434f2a6c7e676f72eba7fc327282a3e3edd57) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Sync to the platform. A control plane's `sync.rules` push each app's configuration to wherever its processes read their environment (PaaS variables, a Kubernetes Secret…), so apps boot on the last values even when the config server is down. A `ConfigSyncTarget` receives `{ set, remove, mode }`, with env names (`RESEND_API_KEY`) and secrets flagged. Every new version is pushed as a debounced delta. `node ace config:sync [--app]` does a full push. `keep` lists names that are never touched.
+
 ## 0.7.0
 
 ### Minor Changes
