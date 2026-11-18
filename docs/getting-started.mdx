@@ -73,24 +73,43 @@ providers: [
 
 ## Before the app's config loads
 
-`config/*.ts` files load before any provider boots. To have remote values while they load, run the
-bootstrap phase at the top of `bin/server.ts`, before the Ignitor:
+`config/*.ts` files read `env` while they load, before any provider boots. To have the server's
+values by then, import them at the top of `start/env.ts`, before `Env.create`. This is the
+counterpart of Spring's `spring.config.import`:
 
-```ts title="bin/server.ts"
-import { bootstrapConfig } from '@adonis-agora/config/bootstrap'
+```ts title="start/env.ts"
+import { Env } from '@adonisjs/core/env'
+import { importRemoteConfig } from '@adonis-agora/config/bootstrap'
 
-await bootstrapConfig({
-  url: process.env.CONFIG_URL!,
-  partition: process.env.CONFIG_APP!,
-  token: process.env.CONFIG_TOKEN!,
-  snapshotPath: 'storage/config/snapshot.json',
-  env: true,
+await importRemoteConfig(new URL('../', import.meta.url), (env) => ({
+  issuer: env.AUTHKIT_ISSUER,
+  clientId: env.SERVICE_CLIENT_ID,
+  clientSecret: env.SERVICE_CLIENT_SECRET,
+  url: env.CONFIG_URL, // optional: without it, the issuer's discovery says where the server is
+}))
+
+export default await Env.create(new URL('../', import.meta.url), {
+  // your schema, unchanged
 })
 ```
 
-Only the server URL and the token's credentials come from the environment: the token must be
-obtainable before the app's own configuration exists. The provider reuses the client the bootstrap
-built, so nothing is fetched twice.
+- **Precedence**, like Spring's default: the process environment, then the `.env` files, then the
+  config server. A variable set locally is never replaced; the server only fills what is missing,
+  and everything goes through your env schema.
+- **Credentials** come from the local environment you are handed (`env`), so they can sit in
+  `.env` in development. With `@adonis-agora/authkit-client` installed, an issuer plus a service
+  client is enough: the token (`urn:agora:config`) and the server URL are found for you, and the
+  app name is the token's partition. Without it, pass `token`, `url` and `partition`.
+- **No credentials:** nothing is fetched. Tests and local development keep their `.env`.
+- **The server down:** the last snapshot is used (`tmp/config/snapshot.json`, `snapshotPath` to
+  move it, `false` for none). Without one, the app boots on its local environment and a warning
+  is printed. The boot never fails because of the config server.
+- **Commands:** `node ace` loads `start/env.ts` too, so commands get the same values.
+
+The provider reuses the client opened here, so the document is not fetched twice.
+
+`bootstrapConfig()`, which needs explicit `url`, `partition` and `token`, still works at the top
+of `bin/server.ts`. Use it when you do not want the `.env` precedence.
 
 ## Read a value
 
