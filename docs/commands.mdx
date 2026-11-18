@@ -54,6 +54,26 @@ node ace config:entry:set stripe.secret sk_live_… --secret
 node ace config:entry:set stripe.secret --vault='vault://aws/prod/streaming#stripe'
 ```
 
+## Importing an environment
+
+`config:import` turns env variables into entries in **one** version. The input is a `.env`, a JSON
+object, or stdin. Use it to move an app's existing environment into the config server:
+
+```sh
+node ace config:import --app=shop --file=.env.production --dry-run   # what would be imported
+node ace config:import --app=shop --file=.env.production --skip='^VITE_'
+printenv | node ace config:import --app=shop --message='from the PaaS'
+```
+
+- `RESEND_API_KEY` becomes the key `resend.api.key`. That is the same mapping `importRemoteConfig`
+  and `sync` use to turn keys back into env names.
+- Values are stored as text, exactly as the environment had them.
+- Names matching `--secrets` are stored as secrets: encrypted at rest and readable only with
+  `config:secrets:read`. The default pattern catches `*_SECRET`, `*_PASSWORD`, `*_TOKEN`,
+  `*_API_KEY`, `*_KEY`, `*_KEY_ID`, DSNs, webhooks and the like.
+- `--skip` leaves names out, for example build-time variables such as `VITE_*`.
+- The command prints names and counts, never a value.
+
 ## Scripting
 
 `--json` prints one object to stdout, nothing else:

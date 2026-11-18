@@ -18,6 +18,7 @@ import {
   ConfigVersionShow,
 } from '../../commands/config.js';
 import ConfigCryptoReseal from '../../commands/crypto.js';
+import ConfigImport, { parseImport } from '../../commands/import.js';
 import ConfigPull from '../../commands/pull.js';
 import ConfigTenantKey from '../../commands/tenant_key.js';
 import { generateKeyPair } from '../../src/crypto-kit/index.js';
@@ -117,6 +118,55 @@ describe('commands', () => {
       list.instance.assertSucceeded();
       expect(list.json().meta.total, flag).toBe(3);
     }
+  });
+
+  it('imports a .env in one version, secrets by name, values kept as text', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agora-config-import-'));
+    const file = join(dir, '.env');
+    writeFileSync(
+      file,
+      'RESEND_API_KEY=re_123\nMAIL_FROM="Shop <noreply@example.com>"\nPORT=3000\nVITE_X=1\n',
+    );
+    try {
+      const dry = await run(ConfigImport as never, [
+        ...scopeFlags,
+        `--file=${file}`,
+        '--dry-run',
+        '--json',
+      ]);
+      dry.instance.assertSucceeded();
+      expect(dry.json().version).toBeNull();
+
+      const imported = await run(ConfigImport as never, [
+        ...scopeFlags,
+        `--file=${file}`,
+        '--skip=^VITE_',
+        '--json',
+      ]);
+      imported.instance.assertSucceeded();
+      const summary = imported.json();
+      expect(summary.version).toBe(1);
+      expect(summary.skipped).toEqual(['VITE_X']);
+      expect(summary.imported).toEqual([
+        { name: 'MAIL_FROM', key: 'mail.from', secret: false },
+        { name: 'PORT', key: 'port', secret: false },
+        { name: 'RESEND_API_KEY', key: 'resend.api.key', secret: true },
+      ]);
+
+      const list = await run(ConfigEntryList as never, [...scopeFlags, '--json']);
+      const byKey = Object.fromEntries(list.json().data.map((e: { key: string }) => [e.key, e]));
+      expect(byKey['resend.api.key']).toMatchObject({ secret: true, masked: true });
+      expect(byKey.port).toMatchObject({ value: '3000' });
+      expect(byKey['mail.from']).toMatchObject({ value: 'Shop <noreply@example.com>' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses .env lines and JSON objects', () => {
+    expect(parseImport('A=1\n# c\nB="x y"\n')).toEqual({ A: '1', B: 'x y' });
+    expect(parseImport('{"A":"1","B":2}')).toEqual({ A: '1', B: '2' });
+    expect(parseImport('  ')).toEqual({});
   });
 
   it('sets, lists, gets, reveals and unsets entries', async () => {
