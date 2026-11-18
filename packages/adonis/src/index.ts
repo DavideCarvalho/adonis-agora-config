@@ -118,6 +118,15 @@ export type {
   VersionSummary,
   WriteContext,
 } from './store/store.js';
+export type {
+  ConfigSyncChange,
+  ConfigSyncOptions,
+  ConfigSyncResult,
+  ConfigSyncRule,
+  ConfigSyncTarget,
+  SyncedVariable,
+} from './sync.js';
+export { ConfigSync } from './sync.js';
 export {
   type ConfigChangeSet,
   createTenantClient,

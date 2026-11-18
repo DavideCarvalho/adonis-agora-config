@@ -4,6 +4,7 @@
     "index",
     "getting-started",
     "central-server",
+    "sync",
     "tenant",
     "transports",
     "authentication",

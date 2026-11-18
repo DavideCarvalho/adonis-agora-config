@@ -41,6 +41,7 @@ import type { ConfigRuntime } from '../src/runtime.js';
 import { setRuntime } from '../src/services/accessor.js';
 import { inSchema, type SqlDatabase } from '../src/sql.js';
 import type { ConfigStore } from '../src/store/store.js';
+import { ConfigSync } from '../src/sync.js';
 import { configTelescopeExtension } from '../src/telescope/extension.js';
 import { registerConfigTelescopeExtension } from '../src/telescope/register.js';
 import {
@@ -315,9 +316,28 @@ export default class ConfigProvider {
       // Every write (console, MCP, command) reaches the streams of this process immediately; another
       // replica catches up on the stream's own 15s version poll.
       ...(controlPlane
-        ? { onChange: (scope, version) => controlPlane!.bus.publish(scope, version) }
+        ? {
+            onChange: (scope, version) => {
+              controlPlane!.bus.publish(scope, version);
+              sync?.notify(scope, version);
+            },
+          }
         : {}),
     });
+    // Pushes to the apps' platforms (`sync`): on every new version, and with `config:sync`.
+    const syncConfig = config.topology === 'control-plane' ? config.sync : undefined;
+    const sync =
+      syncConfig && syncConfig.rules.length > 0
+        ? new ConfigSync(admin, {
+            rules: syncConfig.rules,
+            environment,
+            ...(syncConfig.debounceMs !== undefined ? { debounceMs: syncConfig.debounceMs } : {}),
+            logger: {
+              info: (message) => logger.info(message),
+              warn: (message) => logger.warn(message),
+            },
+          })
+        : undefined;
     this.#admin = admin;
     this.#consoleConfig = consoleConfig;
     logger.info(
@@ -329,6 +349,7 @@ export default class ConfigProvider {
       app,
       store,
       ...(controlPlane ? { controlPlane } : {}),
+      ...(sync ? { sync } : {}),
       secrets: codec !== undefined,
       localEnv: false,
       get: (_key, fallback) => fallback,
