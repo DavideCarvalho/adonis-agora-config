@@ -1,5 +1,11 @@
 # @adonis-agora/config-dashboard
 
+## 0.3.5
+
+### Patch Changes
+
+- [#31](https://github.com/DavideCarvalho/adonis-agora-config/pull/31) [`8fdc286`](https://github.com/DavideCarvalho/adonis-agora-config/commit/8fdc2861ae60600d9dfa46f7a7083f2e99bf3527) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Dashboard: the app/scope picker button now announces "noun: label" instead of the two spans run together, its search also matches the option hint, the highlight stays on a real option when the list shrinks, and focus returns to the button after a pick (console kit sync).
+
 ## 0.3.4
 
 ### Patch Changes
