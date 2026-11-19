@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ConfigDocumentView, ConfigScope } from '@adonis-agora/config-core';
+import { describeStackUse } from '../stack.js';
 import type { ConfigTransport, ConfigTransportFactory } from './types.js';
 
 /** The subscriber half of a raw ioredis client. */
@@ -61,7 +62,7 @@ async function resolveRedis(
  * no secrets.
  */
 export function redisTransport(config: RedisTransportConfig = {}): ConfigTransportFactory {
-  return async (ctx) => {
+  const factory: ConfigTransportFactory = async (ctx) => {
     const prefix = config.prefix ?? 'config';
     const ttl = config.snapshotTtlSeconds ?? 86_400;
     const client = await resolveRedis(ctx, config);
@@ -123,4 +124,12 @@ export function redisTransport(config: RedisTransportConfig = {}): ConfigTranspo
     };
     return transport;
   };
+  // A raw `client` names no connection; otherwise the one resolved below (default `main`).
+  return config.client
+    ? factory
+    : describeStackUse(factory, {
+        tech: 'redis',
+        connection: config.connection ?? 'main',
+        purpose: 'change feed',
+      });
 }

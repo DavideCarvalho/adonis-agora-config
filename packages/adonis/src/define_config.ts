@@ -3,6 +3,7 @@ import type { ApplicationService } from '@adonisjs/core/types';
 import type { CryptoOptions, SecretCodec } from './crypto/secrets.js';
 import type { ConfigConsoleConfig } from './dashboard/define_config.js';
 import type { SqlDatabase } from './sql.js';
+import { describeStackUse, hasLucidConnection, lucidUse, type StackUse } from './stack.js';
 import { LucidStore } from './store/lucid_store.js';
 import { MemoryStore } from './store/memory_store.js';
 import type { ConfigStore } from './store/store.js';
@@ -26,11 +27,14 @@ export type Factory<T> = (context: FactoryContext) => T | Promise<T>;
 export const stores = {
   /** The configuration in your database (Postgres, MySQL, SQLite). The default on a control plane. */
   lucid(options: { connection?: string; autoCreateSchema?: boolean } = {}): Factory<ConfigStore> {
-    return async (context) =>
-      new LucidStore(await context.db(options.connection), {
-        autoCreateSchema: options.autoCreateSchema ?? context.autoCreateSchema,
-        ...(context.secretCodec ? { secretCodec: context.secretCodec } : {}),
-      });
+    return describeStackUse(
+      async (context: FactoryContext) =>
+        new LucidStore(await context.db(options.connection), {
+          autoCreateSchema: options.autoCreateSchema ?? context.autoCreateSchema,
+          ...(context.secretCodec ? { secretCodec: context.secretCodec } : {}),
+        }),
+      () => lucidUse(options.connection, 'configuration'),
+    );
   },
   /** In process memory: tests and local development. */
   memory(): Factory<ConfigStore> {
@@ -243,5 +247,14 @@ export function defineConfig(config: ConfigConfig): ConfigConfig {
   if (config.topology !== 'control-plane' && raw.verifyTenant !== undefined) {
     throw new Error('config: `verifyTenant` only applies to topology "control-plane"');
   }
-  return config;
+  return describeStackUse(config, () => defaultStackUses(config));
+}
+
+/**
+ * What the omitted `store` falls back to on a standalone app or a control plane: the default Lucid
+ * connection. A tenant owns no state. Explicit factories describe themselves.
+ */
+export function defaultStackUses(config: ConfigConfig): StackUse[] {
+  if (config.topology === 'tenant' || config.store || !hasLucidConnection()) return [];
+  return [lucidUse(undefined, 'configuration')];
 }
