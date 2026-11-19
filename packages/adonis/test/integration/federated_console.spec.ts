@@ -217,6 +217,9 @@ describe('federated config console', () => {
     const versions = await call('/versions?app=et');
     expect(versions.body.data.map((v: any) => v.version)).toEqual([3, 2, 1]);
     const version = await call('/versions/2?app=et');
+    expect(version.body.version).toMatchObject({ version: 2 });
+    expect(typeof version.body.version.createdBy).toBe('string');
+    expect(Array.isArray(version.body.entries)).toBe(true);
     expect(JSON.stringify(version.body)).not.toContain(SECRET);
     const diff = await call('/diff?app=et&from=1&to=2');
     expect(JSON.stringify(diff.body)).not.toContain(SECRET);

@@ -195,6 +195,10 @@ describe('config console API', () => {
 
     const versions = await (await fetch(`${base}/api/versions?app=shop`, { headers: auth })).json();
     expect(versions.data[0].version).toBe(2);
+    // One version: the shape the History page reads (`{ version, entries }`).
+    const detail = await (await fetch(`${base}/api/versions/2?app=shop`, { headers: auth })).json();
+    expect(detail.version).toMatchObject({ version: 2, createdBy: expect.any(String) });
+    expect(detail.entries.length).toBeGreaterThan(0);
     // By cursor: no total, and the next page continues below the last version.
     const firstVersion = await (
       await fetch(`${base}/api/versions?app=shop&first=1`, { headers: auth })
