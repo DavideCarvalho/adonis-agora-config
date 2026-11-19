@@ -688,7 +688,8 @@ export class ConfigConsole {
     if (!Number.isInteger(version) || version < 1) throw new HttpError(400, 'invalid version');
     const found = await admin.version(scope, version, await this.#canReadSecrets());
     if (!found) throw new HttpError(404, `no version ${version}`);
-    return ctx.response.json(found);
+    // The console reads `{ version, entries }`; the admin API calls the summary `summary`.
+    return ctx.response.json({ version: found.summary, entries: found.entries });
   }
 
   async diff(ctx: HttpContext) {
