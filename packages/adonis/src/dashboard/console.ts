@@ -2,14 +2,23 @@ import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import {
   assertConfigKey,
+  CONFIG_SCOPES,
   type ConfigEntryInput,
+  type ConfigScope,
   type ConfigValue,
+  capabilityAllows,
   DEFAULT_LABEL,
   toConfigValue,
 } from '@adonis-agora/config-core';
 import { InvalidColumnFilterError, parseCursorParams } from '@adonis-agora/filter';
 import type { HttpContext } from '@adonisjs/core/http';
-import type { ConfigAdmin } from '../admin.js';
+import type { ConfigAdmin, EntryRow } from '../admin.js';
+import {
+  type CommandMeta,
+  FederatedAppError,
+  type FederatedConfigApp,
+  type FederatedConfigApps,
+} from '../federation/console.js';
 import { booleanFilter, parseListQuery } from '../http/list.js';
 import { resolveAccessDeniedPage } from './access_denied_page.js';
 import { type ConsoleActor, consoleActor } from './actor.js';
@@ -47,6 +56,15 @@ export interface ConfigConsoleOptions {
   topology: 'standalone' | 'control-plane';
   registry?: AgoraConsoleRegistry;
   logger: { warn(message: string): void; info?(message: string): void };
+  /** Other apps this console shows (`console.federatedApps`): read from their stores, changed through them. */
+  federated?: FederatedConfigApps;
+}
+
+/** What a request works on: this console's admin, or another app's (read-only) and its channel. */
+interface Target {
+  scope: ConfigScope;
+  admin: ConfigAdmin;
+  federated?: FederatedConfigApp;
 }
 
 /** This console's id in the `'agora.consoles'` registry. */
@@ -113,6 +131,8 @@ export class ConfigConsole {
   readonly #authorize: (ctx: HttpContext) => Promise<ConsoleAuthorizeDecision>;
   /** The authorizer's `apps` grant for each request it allowed. */
   readonly #grants = new WeakMap<HttpContext, string[]>();
+  /** The authorizer's `capabilities` for each request it allowed, when it said. */
+  readonly #capabilities = new WeakMap<HttpContext, string[]>();
   #warned = false;
 
   constructor(private readonly options: ConfigConsoleOptions) {
@@ -157,6 +177,8 @@ export class ConfigConsole {
     router.get(`${root}/assets/:file`, (ctx) => this.asset(ctx));
 
     router.get(`${api}/meta`, (ctx) => this.#guarded(ctx, 'api', () => this.meta(ctx)));
+    router.get(`${api}/apps`, (ctx) => this.#guarded(ctx, 'api', () => this.apps(ctx)));
+    router.get(`${api}/scopes`, (ctx) => this.#guarded(ctx, 'api', () => this.scopes(ctx)));
     router.get(`${api}/entries`, (ctx) => this.#guarded(ctx, 'api', () => this.listEntries(ctx)));
     router.get(`${api}/entries/:key`, (ctx) => this.#guarded(ctx, 'api', () => this.getEntry(ctx)));
     router.put(`${api}/entries/:key`, (ctx) => this.#guarded(ctx, 'api', () => this.setEntry(ctx)));
@@ -183,6 +205,9 @@ export class ConfigConsole {
     const decision = await this.#authorize(ctx);
     if (decision.allowed) {
       if (Array.isArray(decision.apps)) this.#grants.set(ctx, decision.apps);
+      if (Array.isArray(decision.capabilities)) {
+        this.#capabilities.set(ctx, decision.capabilities);
+      }
       return true;
     }
     if (decision.status === 302) {
@@ -231,6 +256,14 @@ export class ConfigConsole {
     if (error instanceof HttpError) {
       return ctx.response.status(error.status).json({ error: error.message });
     }
+    if (error instanceof FederatedAppError) {
+      if (error.detail !== undefined) {
+        this.options.logger.warn(
+          `[@adonis-agora/config] federated console: ${error.message}: ${error.detail}`,
+        );
+      }
+      return ctx.response.status(error.status).json({ error: error.message });
+    }
     if (error instanceof InvalidColumnFilterError) {
       return ctx.response.status(400).json({ error: error.message });
     }
@@ -269,6 +302,55 @@ export class ConfigConsole {
       throw new HttpError(403, `app "${app}" is not granted to this viewer`);
     }
     return { app, environment, label };
+  }
+
+  /** Whether `app` names another app of this console (`console.federatedApps`). */
+  #isFederated(app: string): boolean {
+    return this.options.federated?.has(app) ?? false;
+  }
+
+  /**
+   * The app a request is about: a key of `console.federatedApps` (that app's store, read-only, and
+   * its command channel; the viewer's `apps` grant must name it), else a scope of this console.
+   */
+  async #target(ctx: HttpContext): Promise<Target> {
+    const query = ctx.request.qs() as Record<string, unknown>;
+    const body = this.#body(ctx);
+    const value = (name: string) => {
+      const fromQuery = query[name];
+      if (typeof fromQuery === 'string' && fromQuery !== '') return fromQuery;
+      const fromBody = body[name];
+      if (typeof fromBody === 'string' && fromBody !== '') return fromBody;
+      return undefined;
+    };
+    const app = value('app');
+    if (app && this.options.federated && this.#isFederated(app)) {
+      if (!this.#granted(ctx, app)) {
+        throw new HttpError(403, `app "${app}" is not granted to this viewer`);
+      }
+      const federated = await this.options.federated.get(app);
+      return {
+        scope: {
+          app: federated.partition,
+          environment: value('environment') ?? federated.environment ?? this.options.environment,
+          label: value('label') ?? DEFAULT_LABEL,
+        },
+        admin: federated.admin,
+        federated,
+      };
+    }
+    return { scope: this.#scope(ctx), admin: this.options.admin };
+  }
+
+  /** What a command to another app carries: the viewer (the actor) and what it was granted. */
+  async #commandMeta(ctx: HttpContext): Promise<CommandMeta> {
+    const actor = await this.#actor(ctx);
+    const capabilities = this.#capabilities.get(ctx);
+    return {
+      actor: actor.id,
+      ...(capabilities !== undefined ? { capabilities } : {}),
+      ...(this.options.config.appLabel !== undefined ? { via: this.options.config.appLabel } : {}),
+    };
   }
 
   /** Whether the viewer's grant covers `app` (no grant, or `'*'`: every app). */
@@ -365,7 +447,12 @@ export class ConfigConsole {
     // A granted app the store does not hold yet is listed too, so the viewer can write its first entry.
     const candidates =
       this.options.config.apps ?? [...new Set([...scopes.apps, ...(grant ?? [])])].sort();
-    const apps = candidates.filter((app) => this.#visible(ctx, app));
+    const federated = (this.options.federated?.ids ?? []).filter((app) => this.#granted(ctx, app));
+    // Another app's key names that app here, so a local scope of the same name is not listed.
+    const apps = [
+      ...candidates.filter((app) => this.#visible(ctx, app) && !this.#isFederated(app)),
+      ...federated,
+    ];
     const defaultApp =
       this.options.defaultApp && apps.includes(this.options.defaultApp)
         ? this.options.defaultApp
@@ -383,11 +470,51 @@ export class ConfigConsole {
       canRevealSecrets: this.options.config.revealSecrets,
       topology: this.options.topology,
       actor: actor.id,
+      ...(federated.length > 0
+        ? { federated: federated.map((id) => this.options.federated!.describe(id)) }
+        : {}),
+    });
+  }
+
+  /**
+   * The App picker of the federated console, the shape every Agora console answers: this
+   * console's own scopes are `local`, the other apps are listed with how they are reached.
+   */
+  async apps(ctx: HttpContext) {
+    const federated = (this.options.federated?.ids ?? []).filter((app) => this.#granted(ctx, app));
+    const picked = (ctx.request.qs() as { app?: unknown }).app;
+    return ctx.response.header('cache-control', 'no-store').json({
+      local: { label: this.options.config.appLabel ?? 'This app' },
+      apps: federated.map((id) => this.options.federated!.describe(id)),
+      selected: typeof picked === 'string' && federated.includes(picked) ? picked : null,
+    });
+  }
+
+  /** The environments and labels the picked app holds (another app: its own store's). */
+  async scopes(ctx: HttpContext) {
+    const app = (ctx.request.qs() as { app?: unknown }).app;
+    if (typeof app === 'string' && this.#isFederated(app)) {
+      const target = await this.#target(ctx);
+      const own = (await target.admin.store.listScopes()).filter(
+        (scope) => scope.app === target.scope.app,
+      );
+      const environment = target.federated?.environment ?? this.options.environment;
+      return ctx.response.header('cache-control', 'no-store').json({
+        environments: [...new Set([...own.map((s) => s.environment), environment])].sort(),
+        labels: [...new Set([...own.map((s) => s.label), DEFAULT_LABEL])].sort(),
+        default: { environment, label: DEFAULT_LABEL },
+      });
+    }
+    const scopes = await this.options.admin.scopes();
+    return ctx.response.header('cache-control', 'no-store').json({
+      environments: [...new Set([...scopes.environments, this.options.environment])],
+      labels: [...new Set([...scopes.labels, DEFAULT_LABEL])],
+      default: { environment: this.options.environment, label: DEFAULT_LABEL },
     });
   }
 
   async listEntries(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin } = await this.#target(ctx);
     const list = parseListQuery(ctx.request.qs() as Record<string, unknown>, {
       sortable: ['key', 'updatedAt', 'updatedBy'],
       defaultSort: { field: 'key', direction: 'asc' },
@@ -399,7 +526,7 @@ export class ConfigConsole {
     const reloadable = booleanFilter(list.filters.reloadable);
     const updatedBy = list.filters.updatedBy;
     return ctx.response.json(
-      await this.options.admin.listEntries(scope, await this.#canReadSecrets(), {
+      await admin.listEntries(scope, await this.#canReadSecrets(), {
         page: list.page,
         size: list.size,
         filters: {
@@ -414,10 +541,10 @@ export class ConfigConsole {
   }
 
   async getEntry(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin } = await this.#target(ctx);
     const key = String((ctx.params as Record<string, string>).key ?? '');
     if (!key) throw new HttpError(400, 'key is required');
-    const entry = await this.options.admin.getEntry(scope, key, {
+    const entry = await admin.getEntry(scope, key, {
       canReadSecrets: await this.#canReadSecrets(),
     });
     if (!entry) throw new HttpError(404, `no entry "${key}"`);
@@ -425,7 +552,7 @@ export class ConfigConsole {
   }
 
   async setEntry(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin, federated } = await this.#target(ctx);
     const key = String((ctx.params as Record<string, string>).key ?? '');
     assertConfigKey(key);
     const body = this.#body(ctx);
@@ -462,12 +589,20 @@ export class ConfigConsole {
       }
       input.description = body.description as string | null;
     }
-    const actor = await this.#actor(ctx);
-    const result = await this.options.admin.setEntry(scope, key, input, {
-      actor: actor.id,
-      ...(typeof body.message === 'string' && body.message !== '' ? { message: body.message } : {}),
-    });
-    const entry = await this.options.admin.getEntry(scope, key, {
+    const message =
+      typeof body.message === 'string' && body.message !== '' ? body.message : undefined;
+    const result = federated
+      ? await federated.setEntry(
+          scope,
+          key,
+          { ...input, ...(message !== undefined ? { message } : {}) },
+          await this.#commandMeta(ctx),
+        )
+      : await admin.setEntry(scope, key, input, {
+          actor: (await this.#actor(ctx)).id,
+          ...(message !== undefined ? { message } : {}),
+        });
+    const entry = await admin.getEntry(scope, key, {
       canReadSecrets: await this.#canReadSecrets(),
     });
     return ctx.response
@@ -476,15 +611,18 @@ export class ConfigConsole {
   }
 
   async unsetEntry(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin, federated } = await this.#target(ctx);
     const key = String((ctx.params as Record<string, string>).key ?? '');
     assertConfigKey(key);
-    const actor = await this.#actor(ctx);
     const body = this.#body(ctx);
-    const result = await this.options.admin.unsetEntry(scope, key, {
-      actor: actor.id,
-      ...(typeof body.message === 'string' && body.message !== '' ? { message: body.message } : {}),
-    });
+    const message =
+      typeof body.message === 'string' && body.message !== '' ? body.message : undefined;
+    const result = federated
+      ? await federated.unsetEntry(scope, key, message, await this.#commandMeta(ctx))
+      : await admin.unsetEntry(scope, key, {
+          actor: (await this.#actor(ctx)).id,
+          ...(message !== undefined ? { message } : {}),
+        });
     return ctx.response.json(result);
   }
 
@@ -492,19 +630,33 @@ export class ConfigConsole {
     if (!this.options.config.revealSecrets) {
       throw new HttpError(403, 'revealing secrets is disabled on this console');
     }
-    const scope = this.#scope(ctx);
+    const { scope, admin, federated } = await this.#target(ctx);
     const key = String((ctx.params as Record<string, string>).key ?? '');
-    const actor = await this.#actor(ctx);
-    const entry = await this.options.admin.getEntry(scope, key, {
-      canReadSecrets: true,
-      reveal: { actor: actor.id },
-    });
+    let entry: EntryRow | null;
+    if (federated) {
+      // Another app's secret: only for a viewer `authorize` granted `config:secrets:read`; the app
+      // checks it again, reads the value itself and records the reveal with this viewer as actor.
+      const meta = await this.#commandMeta(ctx);
+      if (!capabilityAllows(meta.capabilities ?? [], CONFIG_SCOPES.secretsRead)) {
+        throw new HttpError(
+          403,
+          `revealing another app's secret needs ${CONFIG_SCOPES.secretsRead} in this console's authorize grant`,
+        );
+      }
+      entry = await federated.reveal(scope, key, meta);
+    } else {
+      const actor = await this.#actor(ctx);
+      entry = await admin.getEntry(scope, key, {
+        canReadSecrets: true,
+        reveal: { actor: actor.id },
+      });
+    }
     if (!entry) throw new HttpError(404, `no entry "${key}"`);
     return ctx.response.header('cache-control', 'no-store').json(entry);
   }
 
   async listVersions(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin } = await this.#target(ctx);
     const list = parseListQuery(ctx.request.qs() as Record<string, unknown>, {
       sortable: ['version', 'createdAt'],
       defaultSort: { field: 'version', direction: 'desc' },
@@ -515,14 +667,14 @@ export class ConfigConsole {
     const cursor = readCursor(ctx.request.qs() as Record<string, unknown>, 100, 20);
     if (cursor !== undefined) {
       return ctx.response.json(
-        await this.options.admin.versionsCursor(scope, {
+        await admin.versionsCursor(scope, {
           ...cursor,
           direction: list.sort.direction,
         }),
       );
     }
     return ctx.response.json(
-      await this.options.admin.listVersions(scope, {
+      await admin.listVersions(scope, {
         page: list.page,
         size: list.size,
         direction: list.sort.direction,
@@ -531,16 +683,16 @@ export class ConfigConsole {
   }
 
   async getVersion(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin } = await this.#target(ctx);
     const version = Number((ctx.params as Record<string, string>).version);
     if (!Number.isInteger(version) || version < 1) throw new HttpError(400, 'invalid version');
-    const found = await this.options.admin.version(scope, version, await this.#canReadSecrets());
+    const found = await admin.version(scope, version, await this.#canReadSecrets());
     if (!found) throw new HttpError(404, `no version ${version}`);
     return ctx.response.json(found);
   }
 
   async diff(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin } = await this.#target(ctx);
     const query = ctx.request.qs() as Record<string, unknown>;
     const from = Number(query.from);
     const to = Number(query.to);
@@ -550,25 +702,28 @@ export class ConfigConsole {
     return ctx.response.json({
       from,
       to,
-      rows: await this.options.admin.diff(scope, from, to, await this.#canReadSecrets()),
+      rows: await admin.diff(scope, from, to, await this.#canReadSecrets()),
     });
   }
 
   async rollback(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin, federated } = await this.#target(ctx);
     const body = this.#body(ctx);
     const to = Number(body.to);
     if (!Number.isInteger(to) || to < 1) throw new HttpError(400, 'to must be a version number');
-    const actor = await this.#actor(ctx);
-    const result = await this.options.admin.rollback(scope, to, {
-      actor: actor.id,
-      ...(typeof body.message === 'string' && body.message !== '' ? { message: body.message } : {}),
-    });
+    const message =
+      typeof body.message === 'string' && body.message !== '' ? body.message : undefined;
+    const result = federated
+      ? await federated.rollback(scope, to, message, await this.#commandMeta(ctx))
+      : await admin.rollback(scope, to, {
+          actor: (await this.#actor(ctx)).id,
+          ...(message !== undefined ? { message } : {}),
+        });
     return ctx.response.json(result);
   }
 
   async audit(ctx: HttpContext) {
-    const scope = this.#scope(ctx);
+    const { scope, admin } = await this.#target(ctx);
     const list = parseListQuery(ctx.request.qs() as Record<string, unknown>, {
       sortable: ['at', 'version'],
       defaultSort: { field: 'at', direction: 'desc' },
@@ -584,7 +739,7 @@ export class ConfigConsole {
         throw new HttpError(400, 'the audit pages by cursor newest first only (sort=-at)');
       }
       return ctx.response.json(
-        await this.options.admin.auditCursor(scope, {
+        await admin.auditCursor(scope, {
           ...cursor,
           ...(typeof action === 'string' ? { action } : {}),
           ...(typeof key === 'string' ? { key } : {}),
@@ -592,7 +747,7 @@ export class ConfigConsole {
       );
     }
     return ctx.response.json(
-      await this.options.admin.audit(scope, {
+      await admin.audit(scope, {
         page: list.page,
         size: list.size,
         ...(typeof action === 'string' ? { action } : {}),

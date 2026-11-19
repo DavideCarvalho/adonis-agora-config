@@ -96,7 +96,7 @@ const diffColumns: Column<DiffRow>[] = [
 ];
 
 function RollbackDialog({ version, onClose }: { version: number; onClose: () => void }) {
-  const { api, scope } = useConsole();
+  const { api, scope, readOnly } = useConsole();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState('');
   const rollback = useMutation({
@@ -140,7 +140,8 @@ function RollbackDialog({ version, onClose }: { version: number; onClose: () => 
           </Button>
           <Button
             variant="destructive"
-            disabled={rollback.isPending}
+            disabled={rollback.isPending || readOnly !== undefined}
+            title={readOnly}
             onClick={() => rollback.mutate()}
           >
             {rollback.isPending ? 'Rolling back…' : 'Roll back'}

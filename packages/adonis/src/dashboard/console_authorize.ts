@@ -18,6 +18,12 @@ export type ConsoleAuthorizeResult =
        * app `console.apps` allows.
        */
       apps?: '*' | string[];
+      /**
+       * What this viewer may do, in the capability vocabulary (`config:secrets:read`, `config:*`).
+       * Only the federated console reads it: revealing another app's secret needs
+       * `config:secrets:read` here, and the owning app checks it again.
+       */
+      capabilities?: string[];
     }
   | { allowed: false; reason?: 'unauthenticated' | 'forbidden' }
   | { redirectTo: string };
@@ -38,7 +44,7 @@ export type ConsoleAuthorize =
 
 /** A {@link ConsoleAuthorizeResult} normalized to the answer the console writes. */
 export type ConsoleAuthorizeDecision =
-  | { allowed: true; apps?: '*' | string[] }
+  | { allowed: true; apps?: '*' | string[]; capabilities?: string[] }
   | { allowed: false; status: 401; reason: 'unauthenticated' }
   | { allowed: false; status: 403; reason: 'forbidden'; error?: unknown }
   | { allowed: false; status: 302; redirectTo: string };
@@ -73,10 +79,20 @@ export function normalizeConsoleAuthorizeResult(result: unknown): ConsoleAuthori
     reason?: unknown;
     redirectTo?: unknown;
     apps?: unknown;
+    capabilities?: unknown;
   };
   if (value.allowed === true) {
+    const capabilities = Array.isArray(value.capabilities)
+      ? {
+          capabilities: value.capabilities.filter(
+            (c): c is string => typeof c === 'string' && c !== '',
+          ),
+        }
+      : {};
     if (value.apps === undefined || value.apps === '*') {
-      return value.apps === '*' ? { allowed: true, apps: '*' } : { allowed: true };
+      return value.apps === '*'
+        ? { allowed: true, apps: '*', ...capabilities }
+        : { allowed: true, ...capabilities };
     }
     // Anything but '*' or a list of names narrows to the names it holds: never wider.
     const apps = Array.isArray(value.apps)
@@ -89,7 +105,7 @@ export function normalizeConsoleAuthorizeResult(result: unknown): ConsoleAuthori
           ),
         ]
       : [];
-    return { allowed: true, apps };
+    return { allowed: true, apps, ...capabilities };
   }
   if (value.allowed === undefined && typeof value.redirectTo === 'string' && value.redirectTo) {
     return { allowed: false, status: 302, redirectTo: value.redirectTo };
@@ -212,9 +228,11 @@ export function anyAuthorize(
     for (const authorize of resolved) {
       const decision = await authorize(ctx);
       if (decision.allowed) {
-        return decision.apps !== undefined
-          ? { allowed: true, apps: decision.apps }
-          : { allowed: true };
+        return {
+          allowed: true,
+          ...(decision.apps !== undefined ? { apps: decision.apps } : {}),
+          ...(decision.capabilities !== undefined ? { capabilities: decision.capabilities } : {}),
+        };
       }
       if (decision.status === 302) {
         redirectTo ??= decision.redirectTo;

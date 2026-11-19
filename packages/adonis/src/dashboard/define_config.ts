@@ -1,4 +1,5 @@
 import type { HttpContext } from '@adonisjs/core/http';
+import type { FederatedConfigAppConfig } from '../federation/console.js';
 import type { AccessDeniedOption } from './access_denied_page.js';
 import type { ConsoleAuthorize } from './console_authorize.js';
 import type { SignOutOption, ViewerHook } from './console_shell.js';
@@ -32,6 +33,17 @@ export interface ConfigConsoleConfig {
    * Default: every app the store holds.
    */
   apps?: string[];
+  /**
+   * Other apps this console shows next to its own scopes (the federated console): apps that run
+   * `@adonis-agora/config` standalone, with their own store and keys. The console reads each one's
+   * versions and audit straight from its tables (secret values never leave them), and sends writes
+   * and reveals to the app itself over Redis; that app sets `consoleCommands` in its
+   * config/config.ts. The key is what the App picker selects (`?app=`); `authorize`'s `apps` grant
+   * decides who sees which.
+   */
+  federatedApps?: Record<string, FederatedConfigAppConfig>;
+  /** This console's own name in the App picker, and the `via` the other apps log. */
+  appLabel?: string;
 }
 
 export interface ResolvedConsoleConfig {
@@ -46,6 +58,8 @@ export interface ResolvedConsoleConfig {
   accessDenied?: AccessDeniedOption<HttpContext>;
   loginHref?: string;
   apps?: string[];
+  federatedApps?: Record<string, FederatedConfigAppConfig>;
+  appLabel?: string;
 }
 
 /** Normalizes the mount path: a same-origin absolute path, no trailing slash (root is `''`). */
@@ -79,5 +93,9 @@ export function resolveConsoleConfig(
     ...(provided.accessDenied ? { accessDenied: provided.accessDenied } : {}),
     ...(provided.loginHref ? { loginHref: provided.loginHref } : {}),
     ...(provided.apps ? { apps: provided.apps } : {}),
+    ...(provided.federatedApps && Object.keys(provided.federatedApps).length > 0
+      ? { federatedApps: provided.federatedApps }
+      : {}),
+    ...(provided.appLabel ? { appLabel: provided.appLabel } : {}),
   };
 }

@@ -1,0 +1,140 @@
+---
+title: Federated console
+description: Show and manage an app that runs config standalone from another app's console, without moving its configuration or its keys.
+icon: Waypoints
+---
+
+An app can keep its configuration **standalone** (its own store, its own keys, no runtime
+dependency on any other app) and still appear in another app's console, next to that console's
+own apps. Typically the Hub's console lists its control-plane tenants and, in the same App picker,
+the apps that run config on their own.
+
+Two sides take part:
+
+- **the console app** (the Hub) names the other apps in `console.federatedApps`;
+- **each owning app** answers that console with `consoleCommands`.
+
+## The console app
+
+```ts title="config/config.ts"
+import { defineConfig } from '@adonis-agora/config'
+import { authkitDashboardAuthorize } from '@adonis-agora/authkit-client'
+
+export default defineConfig({
+  topology: 'control-plane',
+  verifyTenant,
+  console: {
+    appLabel: 'Hub',
+    authorize: authkitDashboardAuthorize({ role: 'ADMIN' }),
+    federatedApps: {
+      'entre-textos': {
+        label: 'Entre Textos',
+        // The app's `app` in its own config/config.ts. Default: the key.
+        partition: 'entre-textos',
+        // A connection in THIS app's config/database.ts that reaches its tables.
+        store: { connection: 'entretextos', schema: 'public' },
+        // A connection in THIS app's config/redis.ts, and the app's consoleCommands.prefix.
+        controlPlane: { connection: 'main', prefix: 'entretextos' },
+        // environment: 'production',
+        // actions: false,   // browse only from here
+        // timeoutMs: 15_000,
+      },
+    },
+  },
+})
+```
+
+The key (`entre-textos`) is what the App picker selects, and what travels in the URL as `?app=`.
+Pick it and the console shows that app's entries, history, diff and audit, with a **federated**
+badge and a note saying where the data comes from.
+
+The console only **reads** the other app's `config_versions` and `config_audit` tables. Give the
+connection's role `SELECT` on them, nothing else:
+
+```sql
+GRANT USAGE ON SCHEMA public TO hub;
+GRANT SELECT ON public.config_versions, public.config_audit TO hub;
+```
+
+### Who sees which app
+
+`authorize` decides, with the same `apps` grant as every Agora console. A viewer sees the federated
+apps the grant names (`'*'` or no `apps`: all of them). Revealing a secret of another app also needs
+`config:secrets:read` in the grant's `capabilities`:
+
+```ts title="config/config.ts"
+console: {
+  authorize: async (ctx) => {
+    const user = ctx.auth.user
+    if (!user?.isAdmin) return false
+    return {
+      allowed: true,
+      apps: ['entre-textos'],
+      capabilities: user.isOwner ? ['config:secrets:read'] : [],
+    }
+  },
+}
+```
+
+## The owning app
+
+```ts title="config/config.ts"
+import env from '#start/env'
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({
+  topology: 'standalone',
+  app: 'entre-textos',
+  consoleCommands: {
+    connection: 'main',
+    prefix: 'entretextos',
+    actions: true, // set, unset and roll back from the other console
+    reveal: true,  // reveal a secret to a viewer granted config:secrets:read
+  },
+})
+```
+
+It needs `@adonisjs/redis` and its `APP_KEY`. Every web instance listens; exactly one runs each
+command. With `actions` and `reveal` off (the default), the other console only browses.
+
+Changes made from the other console are this app's own: a new version in its store, an audit row
+with the other console's viewer as the actor, the same `config:*` events as a change made here.
+Reveals are audited the same way.
+
+## What crosses where
+
+| | How | What the console app gets |
+| --- | --- | --- |
+| Entries, history, diff, audit | read from the app's tables | values of plain entries; secrets, `vault://` references and sealed values **masked** |
+| Set, unset, roll back | a command to the app over Redis | the new version number |
+| Reveal | a command to the app over Redis | the value, for that one request |
+
+- **Secrets never leave the app in clear.** The console reads the tables without the app's keys:
+  a secret's value and a vault reference are dropped as the row is read. A value written from the
+  console crosses Redis sealed to a key derived from the app's `APP_KEY`; a revealed value comes
+  back sealed to a key the console made for that request.
+- **The app decides.** `consoleCommands.actions` and `.reveal` are the app's switches; the console's
+  `actions: false` makes it read-only from there too.
+- **Down app, readable data.** When no instance of the app listens, a change answers `503` at once;
+  reading keeps working, it never needed the app.
+
+## Using it from code
+
+The console's API takes `?app=<key>` like any other app:
+
+```ts title="app/controllers/settings_controller.ts"
+import config from '@adonis-agora/config/services/main'
+
+export default class SettingsController {
+  async show() {
+    // This app's own values: the federated console changes nothing here.
+    return { checkoutTimeout: config.get('checkout.timeout', 30) }
+  }
+}
+```
+
+| Route | |
+| --- | --- |
+| `GET /_config/api/apps` | the App picker: `{ local, apps: [{ id, label, mode, actions }], selected }` |
+| `GET /_config/api/scopes?app=<key>` | the environments and labels that app holds |
+| every other console route | with `?app=<key>`, about that app |

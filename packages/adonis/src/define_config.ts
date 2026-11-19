@@ -87,6 +87,18 @@ export interface StandaloneConfig extends BaseConfig {
   schema?: string;
   /** Mount the console (the SPA + its JSON API). Default on. */
   console?: ConfigConsoleConfig | false;
+  /**
+   * Answer another app's federated config console (its `console.federatedApps`): that console reads
+   * this app's versions and audit from the database, without secret values, and sends here what
+   * only this app may do — set and unset entries, roll back (with `actions: true`), and reveal a
+   * secret (with `reveal: true`). Every web instance listens; one claims each command and runs it,
+   * with the other console's viewer recorded as the actor. Needs `@adonisjs/redis`. Off when omitted.
+   *
+   * ```ts
+   * consoleCommands: { connection: 'main', prefix: 'entretextos', actions: true },
+   * ```
+   */
+  consoleCommands?: ConfigConsoleCommandsConfig;
 }
 
 /** The server every app connects to. */
@@ -115,11 +127,48 @@ export interface ControlPlaneConfig extends BaseConfig {
   /** Mount the console (the SPA + its JSON API). Default on. */
   console?: ConfigConsoleConfig | false;
   /**
+   * Answer another app's federated config console (its `console.federatedApps`): that console reads
+   * this app's versions and audit from the database, without secret values, and sends here what
+   * only this app may do — set and unset entries, roll back (with `actions: true`), and reveal a
+   * secret (with `reveal: true`). Every web instance listens; one claims each command and runs it,
+   * with the other console's viewer recorded as the actor. Needs `@adonisjs/redis`. Off when omitted.
+   *
+   * ```ts
+   * consoleCommands: { connection: 'main', prefix: 'entretextos', actions: true },
+   * ```
+   */
+  consoleCommands?: ConfigConsoleCommandsConfig;
+  /**
    * How this control plane announces changes to broker-backed tenants (`transports.redis(...)`,
    * `transports.durable(...)`). The HTTP API stays mounted regardless: browsers, the console and
    * http tenants always use it.
    */
   transport?: ConfigTransportFactory;
+}
+
+/** {@link StandaloneConfig.consoleCommands}. */
+export interface ConfigConsoleCommandsConfig {
+  /** The `@adonisjs/redis` connection. Defaults to its default connection. */
+  connection?: string;
+  /**
+   * This app's name on the channel (`<prefix>-config-console`): the same `prefix` the other
+   * console names in its `federatedApps` entry. Not the connection's `keyPrefix`.
+   */
+  prefix: string;
+  /**
+   * Take changes from the other console: set and unset entries, roll back. Each one is a version
+   * and an audit row of this app's own. Default `false` (the other console only browses). Values
+   * arrive sealed to a key derived from this app's `APP_KEY`.
+   */
+  actions?: boolean;
+  /**
+   * Reveal a secret to the other console's viewer when its `authorize` granted
+   * `config:secrets:read`. Audited here like a reveal in this app's console. The value goes back
+   * sealed to a key made for that one request. Default `false`.
+   */
+  reveal?: boolean;
+  /** The partitions the other console may touch. Default: this app's own (`app`), else any. */
+  partitions?: string[];
 }
 
 /** An app that reads its configuration from a control plane. */
@@ -192,6 +241,7 @@ export interface TenantTopologyConfig extends BaseConfig {
   autoCreateSchema?: never;
   schema?: never;
   console?: never;
+  consoleCommands?: never;
 }
 
 export type ConfigConfig = StandaloneConfig | ControlPlaneConfig | TenantTopologyConfig;

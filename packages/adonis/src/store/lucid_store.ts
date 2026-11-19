@@ -44,6 +44,11 @@ export interface LucidStoreOptions {
   /** Postgres schema / MySQL database for this package's tables. */
   schema?: string;
   secretCodec?: SecretCodec;
+  /**
+   * `redact` reads another app's store without its keys (the federated console): secret values and
+   * vault references never leave the row, and every write is refused. Default `open`.
+   */
+  secrets?: 'open' | 'redact';
   /** Clock, so tests can pin timestamps. */
   now?: () => string;
 }
@@ -106,7 +111,7 @@ export class LucidStore implements ConfigStore {
     // custom factory) names `schema.table` in every query, not only in `setup()`.
     this.db = inSchema(db, options.schema);
     this.dialect = dialectOf(this.db);
-    this.#sealer = new DocumentSealer(options.secretCodec);
+    this.#sealer = new DocumentSealer(options.secretCodec, options.secrets ?? 'open');
     this.#now = options.now ?? (() => new Date().toISOString());
   }
 

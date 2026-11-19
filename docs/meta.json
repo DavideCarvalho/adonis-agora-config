@@ -10,6 +10,7 @@
     "authkit",
     "secrets",
     "console",
+    "federated-console",
     "telescope",
     "commands",
     "mcp",
