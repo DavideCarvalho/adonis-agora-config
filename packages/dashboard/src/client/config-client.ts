@@ -78,8 +78,28 @@ export interface Scope {
   label: string;
 }
 
+/** Another app the federated console shows (`console.federatedApps`). */
+export interface FederatedAppInfo {
+  id: string;
+  label: string;
+  mode?: 'federated' | 'control-plane';
+  /** Who runs changes on it: the app itself (`app`), or nobody from here (`none`). */
+  actions?: 'app' | 'none' | 'here';
+  /** The environment the console opens it on. */
+  environment?: string;
+}
+
+/** The environments and labels one app holds. */
+export interface ScopeLists {
+  environments: string[];
+  labels: string[];
+  default: { environment: string; label: string };
+}
+
 export interface Meta {
   apps: string[];
+  /** The apps of `apps` that are other apps (federated), with how they are reached. */
+  federated?: FederatedAppInfo[];
   environments: string[];
   labels: string[];
   default: Scope;
@@ -174,6 +194,11 @@ export class ConfigApi {
 
   meta(): Promise<Meta> {
     return this.#request('GET', '/meta');
+  }
+
+  /** The environments and labels `app` holds (a federated app: its own store's). */
+  scopes(app: string): Promise<ScopeLists> {
+    return this.#request('GET', `/scopes?${new URLSearchParams({ app })}`);
   }
 
   entries(

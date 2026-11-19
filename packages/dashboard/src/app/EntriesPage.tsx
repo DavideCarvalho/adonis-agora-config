@@ -77,7 +77,7 @@ const columns: Column<Entry>[] = [
 ];
 
 function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose: () => void }) {
-  const { api, scope, meta } = useConsole();
+  const { api, scope, meta, readOnly } = useConsole();
   const queryClient = useQueryClient();
   const editing = entry !== 'new' && entry !== null ? entry : undefined;
   const [key, setKey] = useState(editing?.key ?? '');
@@ -132,7 +132,7 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
     onSuccess: (revealed) => setValue(editorText(revealed.value)),
   });
 
-  const error = (save.error ?? remove.error) as Error | null;
+  const error = (save.error ?? remove.error ?? reveal.error) as Error | null;
 
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
@@ -263,7 +263,8 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
           {editing ? (
             <Button
               variant={confirmDelete ? 'destructive' : 'ghost'}
-              disabled={remove.isPending}
+              disabled={remove.isPending || readOnly !== undefined}
+              title={readOnly}
               onClick={() => (confirmDelete ? remove.mutate() : setConfirmDelete(true))}
             >
               {confirmDelete ? 'Really delete?' : 'Delete'}
@@ -275,8 +276,12 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
           <Button
             variant="brand"
             disabled={
-              save.isPending || key.trim() === '' || (value.trim() === '' && vault.trim() === '')
+              save.isPending ||
+              readOnly !== undefined ||
+              key.trim() === '' ||
+              (value.trim() === '' && vault.trim() === '')
             }
+            title={readOnly}
             onClick={() => save.mutate()}
           >
             {save.isPending ? 'Saving…' : 'Save'}
@@ -297,7 +302,7 @@ export const entriesParams = {
 };
 
 export function EntriesPage() {
-  const { api, scope } = useConsole();
+  const { api, scope, readOnly } = useConsole();
   const [{ q: search, page }, setView] = useQueryStates(entriesParams);
   const setPage = (next: number) => void setView({ page: next });
   const [editing, setEditing] = useState<Entry | 'new' | null>(null);
@@ -312,7 +317,12 @@ export function EntriesPage() {
         title="Entries"
         description="One flat document per app, environment and label. Every save is a new version."
         actions={
-          <Button variant="brand" onClick={() => setEditing('new')}>
+          <Button
+            variant="brand"
+            disabled={readOnly !== undefined}
+            title={readOnly}
+            onClick={() => setEditing('new')}
+          >
             New entry
           </Button>
         }
@@ -354,7 +364,12 @@ export function EntriesPage() {
                   : 'Create the first entry for this app, environment and label.'
               }
               action={
-                <Button variant="brand" onClick={() => setEditing('new')}>
+                <Button
+                  variant="brand"
+                  disabled={readOnly !== undefined}
+                  title={readOnly}
+                  onClick={() => setEditing('new')}
+                >
                   New entry
                 </Button>
               }

@@ -3,10 +3,13 @@ import { parseAsString, useQueryStates } from 'nuqs';
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIcon,
+  AppModeBadge,
   AppShell,
+  actionsUnavailableReason,
   ClockIcon,
   ComboSelect,
   ErrorBoundary,
+  FederatedNotice,
   ListIcon,
   NuqsHashAdapter,
   PageBody,
@@ -15,7 +18,13 @@ import {
   subscribeHashUrl,
 } from '../agora-kit';
 import { Skeleton } from '../agora-kit/ui/skeleton';
-import { ConfigApi, type Meta, readBootstrap, type Scope } from '../client/config-client';
+import {
+  ConfigApi,
+  type Meta,
+  readBootstrap,
+  type Scope,
+  type ScopeLists,
+} from '../client/config-client';
 import { AuditPage } from './AuditPage';
 import { ConsoleContext } from './console-context';
 import { EntriesPage } from './EntriesPage';
@@ -215,6 +224,14 @@ function Console() {
     [meta.data, bootstrap],
   );
   const [scope, setScope] = useScope(defaults);
+  const federated = meta.data?.federated?.find((app) => app.id === scope?.app);
+  // Another app's environments and labels live in its own store.
+  const federatedScopes = useQuery<ScopeLists>({
+    queryKey: ['scopes', federated?.id],
+    queryFn: () => api!.scopes(federated!.id),
+    enabled: api !== null && federated !== undefined,
+    retry: false,
+  });
 
   if (bootstrap === null || api === null) {
     return (
@@ -237,12 +254,19 @@ function Console() {
     );
   }
 
-  const environments = [...new Set([...meta.data.environments, scope.environment])];
-  const labels = [...new Set([...meta.data.labels, scope.label])];
+  const lists = federated ? federatedScopes.data : meta.data;
+  const environments = [...new Set([...(lists?.environments ?? []), scope.environment])];
+  const labels = [...new Set([...(lists?.labels ?? []), scope.label])];
   const CurrentPage = PAGES[page];
+  const readOnly = federated ? actionsUnavailableReason(federated.label, federated) : undefined;
+  const pickApp = (app: string) => {
+    const target = meta.data?.federated?.find((candidate) => candidate.id === app);
+    // A federated app opens on its own environment; coming back keeps the current one.
+    setScope({ ...scope, app, environment: target?.environment ?? scope.environment });
+  };
 
   return (
-    <ConsoleContext.Provider value={{ api, meta: meta.data, scope, setScope }}>
+    <ConsoleContext.Provider value={{ api, meta: meta.data, scope, setScope, federated, readOnly }}>
       <AppShell
         brand={{
           name: 'config',
@@ -292,8 +316,15 @@ function Console() {
               label="app"
               value={scope.app}
               options={[...new Set([...meta.data.apps, scope.app])]}
-              onChange={(app) => setScope({ ...scope, app })}
+              onChange={pickApp}
             />
+            {federated ? (
+              <AppModeBadge
+                appLabel={federated.label}
+                mode={federated.mode}
+                actions={federated.actions}
+              />
+            ) : null}
             <ScopePicker
               label="env"
               value={scope.environment}
@@ -310,6 +341,14 @@ function Console() {
         }
       >
         <PageBody>
+          {federated ? (
+            <FederatedNotice
+              appLabel={federated.label}
+              mode={federated.mode}
+              actions={federated.actions}
+              className="mb-3"
+            />
+          ) : null}
           <ErrorBoundary label={CurrentPage.title} resetKeys={[page, scope]}>
             <CurrentPage.render />
           </ErrorBoundary>

@@ -208,7 +208,15 @@ export async function resealStoredEntry(
  * text is exactly what this package exists to prevent.
  */
 export class DocumentSealer {
-  constructor(private readonly codec: SecretCodec | undefined) {}
+  /**
+   * `redact`: a reader with no keys (a federated console reading another app's store). It never
+   * opens a value: a secret, vault or sealed entry comes back without `value` and `vault`, and it
+   * refuses to seal, so a store in this mode cannot write a secret either.
+   */
+  constructor(
+    private readonly codec: SecretCodec | undefined,
+    private readonly mode: 'open' | 'redact' = 'open',
+  ) {}
 
   get configured(): boolean {
     return this.codec !== undefined;
@@ -220,6 +228,9 @@ export class DocumentSealer {
   }
 
   async sealEntry(entry: ConfigEntryState, aad: string): Promise<ConfigEntryState> {
+    if (this.mode === 'redact') {
+      throw new Error("@adonis-agora/config: this store only reads another app's configuration");
+    }
     // A value sealed to an app is opaque here: the control plane must never open (or re-seal) it.
     if (
       !entry.secret ||
@@ -237,6 +248,7 @@ export class DocumentSealer {
   }
 
   async openEntry(entry: ConfigEntryState, aad: string): Promise<ConfigEntryState> {
+    if (this.mode === 'redact') return redactEntry(entry);
     if (
       !entry.secret ||
       entry.vault !== undefined ||
@@ -296,6 +308,17 @@ export class DocumentSealer {
       ...(record.after ? { after: await this.openEntry(record.after, entryAad(record, key)) } : {}),
     };
   }
+}
+
+/**
+ * An entry without anything secret in it: a secret, vault-backed or sealed entry loses `value` and
+ * `vault` (a vault reference names a credential path); its flags and metadata stay.
+ */
+export function redactEntry(entry: ConfigEntryState): ConfigEntryState {
+  if (!entry.secret && entry.vault === undefined && entry.sealedTo === undefined)
+    return { ...entry };
+  const { value: _value, vault: _vault, ...rest } = entry;
+  return { ...rest, secret: true };
 }
 
 /** Whether two entries hold the same value and flags (after sealing). */
