@@ -6,7 +6,6 @@ import type { SqlDatabase } from './sql.js';
 import { LucidStore } from './store/lucid_store.js';
 import { MemoryStore } from './store/memory_store.js';
 import type { ConfigStore } from './store/store.js';
-import type { ConfigSyncRule } from './sync.js';
 import { isTenantUrlSource, type TenantUrlSource } from './topology/tenant_url.js';
 import type { TenantTokenSource } from './topology/token.js';
 import type { TenantVerifierInput } from './topology/verify.js';
@@ -117,12 +116,6 @@ export interface ControlPlaneConfig extends BaseConfig {
    * http tenants always use it.
    */
   transport?: ConfigTransportFactory;
-  /**
-   * Push each app's configuration to where its processes read their environment (a PaaS's
-   * variables, a Kubernetes Secret…), on every new version and with `node ace config:sync`. The app
-   * keeps reading plain env variables, and boots on the last pushed values when this server is down.
-   */
-  sync?: { rules: ConfigSyncRule[]; debounceMs?: number };
 }
 
 /** An app that reads its configuration from a control plane. */

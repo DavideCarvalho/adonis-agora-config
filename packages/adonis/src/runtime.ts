@@ -1,7 +1,6 @@
 import type { ConfigValue } from '@adonis-agora/config-core';
 import type { ControlPlane } from './http/control_plane.js';
 import type { ConfigStore } from './store/store.js';
-import type { ConfigSync } from './sync.js';
 import type { TenantClient, TenantStatus } from './topology/tenant_client.js';
 import type { TenantKeyring } from './topology/tenant_keyring.js';
 
@@ -15,8 +14,6 @@ export interface ConfigRuntime {
   /** Control plane and standalone only. */
   store?: ConfigStore;
   controlPlane?: ControlPlane;
-  /** Control plane only: the pushes to the apps' platforms (`sync`), when configured. */
-  sync?: ConfigSync;
   /** Tenant only. */
   client?: TenantClient;
   /** Tenant only: the app's own X25519 keyring (opens secrets sealed to it). */

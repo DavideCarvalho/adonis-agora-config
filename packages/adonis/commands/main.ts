@@ -15,7 +15,6 @@ import {
 import ConfigCryptoReseal from './crypto.js';
 import ConfigImport from './import.js';
 import ConfigPull from './pull.js';
-import ConfigSyncCommand from './sync.js';
 import ConfigTenantKey from './tenant_key.js';
 
 /**
@@ -36,7 +35,6 @@ const loader = new ListLoader([
   ConfigEnv,
   ConfigImport,
   ConfigPull,
-  ConfigSyncCommand,
   ConfigCryptoReseal,
   ConfigTenantKey,
   AgoraDoctor,
