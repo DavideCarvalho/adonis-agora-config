@@ -65,8 +65,8 @@ node ace config:import --app=shop --file=.env.production --skip='^VITE_'
 printenv | node ace config:import --app=shop --message='from the PaaS'
 ```
 
-- `RESEND_API_KEY` becomes the key `resend.api.key`. That is the same mapping `importRemoteConfig`
-  and `sync` use to turn keys back into env names.
+- `RESEND_API_KEY` becomes the key `resend.api.key`. `importRemoteConfig` maps keys back
+  to env names the same way.
 - Values are stored as text, exactly as the environment had them.
 - Names matching `--secrets` are stored as secrets: encrypted at rest and readable only with
   `config:secrets:read`. The default pattern catches `*_SECRET`, `*_PASSWORD`, `*_TOKEN`,
