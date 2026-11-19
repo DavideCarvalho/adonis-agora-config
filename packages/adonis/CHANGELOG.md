@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.11.0
+
+### Minor Changes
+
+- [#27](https://github.com/DavideCarvalho/adonis-agora-config/pull/27) [`f69c50d`](https://github.com/DavideCarvalho/adonis-agora-config/commit/f69c50dab31a891b03b611f68f53d74c0ba0ac4b) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Remove platform sync. `sync.rules`, `ConfigSync`, its types and `node ace config:sync` are gone: apps read their configuration at boot with `importRemoteConfig` (local env wins), and the config server never writes to a platform's variables. Drop `sync` from `config/config.ts` if you set it.
+
 ## 0.10.0
 
 ### Minor Changes
