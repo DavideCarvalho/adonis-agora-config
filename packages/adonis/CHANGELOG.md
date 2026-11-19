@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.12.1
+
+### Patch Changes
+
+- [#33](https://github.com/DavideCarvalho/adonis-agora-config/pull/33) [`2ad9bcd`](https://github.com/DavideCarvalho/adonis-agora-config/commit/2ad9bcdfc38221c79ed467fc109a1ca27d9fb50b) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Console: opening a version on the History page no longer crashes ("Cannot read properties of undefined (reading 'createdBy')"). `GET <console>/api/versions/:version` answers `{ version, entries }`, the shape the page reads.
+
 ## 0.12.0
 
 ### Minor Changes
