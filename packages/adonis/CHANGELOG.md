@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 0.11.1
+
+### Patch Changes
+
+- [#29](https://github.com/DavideCarvalho/adonis-agora-config/pull/29) [`ef4ffe2`](https://github.com/DavideCarvalho/adonis-agora-config/commit/ef4ffe2725151421fb30f710ccaf92c3e7bb0cd2) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `stores.lucid()` and `transports.redis()` now describe the infrastructure they use (`Symbol.for('@adonis-agora/stack')`), and the `defineConfig` result describes the default Lucid store, so telescope's Architecture page shows "config: configuration → PostgreSQL" without any app code.
+
 ## 0.11.0
 
 ### Minor Changes
