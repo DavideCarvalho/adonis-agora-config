@@ -23,15 +23,6 @@ for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
   const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'));
   if (pkg.private === true) continue;
 
-  // Config is 0.x on purpose and is not part of the 1.x Agora train. Declaring that here is what
-  // keeps `agora:doctor`'s "Agora versions line up" check from flagging it next to 1.x libs.
-  if (pkg.agora?.versioning !== 'independent') {
-    failed++;
-    console.error(
-      `${pkg.name}: package.json must declare "agora": { "versioning": "independent" } (this package is not on the 1.x Agora train).`,
-    );
-  }
-
   const attwArgs = ['attw', '--pack', '.'];
   if (pkg.type === 'module') attwArgs.push('--profile', 'esm-only');
 

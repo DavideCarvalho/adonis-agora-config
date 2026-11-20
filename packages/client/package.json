@@ -1,7 +1,7 @@
 {
   "name": "@adonis-agora/config-client",
   "version": "0.1.2",
-  "description": "Remote-safe client for an @adonis-agora/config server \u2014 fetch a scope with a shared secret or authkit client credentials, from any runtime. Part of the Agora ecosystem.",
+  "description": "Remote-safe client for an @adonis-agora/config server — fetch a scope with a shared secret or authkit client credentials, from any runtime. Part of the Agora ecosystem.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -61,8 +61,5 @@
   },
   "engines": {
     "node": ">=24"
-  },
-  "agora": {
-    "versioning": "independent"
   }
 }
