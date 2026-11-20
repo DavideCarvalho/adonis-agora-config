@@ -1,5 +1,11 @@
 # @adonis-agora/config-dashboard
 
+## 1.0.0-rc.1
+
+### Minor Changes
+
+- [#35](https://github.com/DavideCarvalho/adonis-agora-config/pull/35) [`33afcd8`](https://github.com/DavideCarvalho/adonis-agora-config/commit/33afcd872175de0d03aa379943f191d66aad5fa2) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - The console shows when things were created and changed: the entry detail shows created and updated dates (`—` when unknown, the exact time on hover), and the entry list header shows the current version and when the scope was created and last updated.
+
 ## 1.0.0-rc.0
 
 ### Major Changes
