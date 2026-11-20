@@ -1,5 +1,11 @@
 # @adonis-agora/config-dashboard
 
+## 1.0.0-rc.0
+
+### Major Changes
+
+- [#34](https://github.com/DavideCarvalho/adonis-agora-config/pull/34) [`905ef8a`](https://github.com/DavideCarvalho/adonis-agora-config/commit/905ef8ae92f90831992caa928fe11320831bfa39) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - 1.0 release candidate: config joins the rest of the Agora libraries on the 1.x line. No API changes from 0.12.
+
 ## 0.4.0
 
 ### Minor Changes

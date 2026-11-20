@@ -1,6 +1,6 @@
 {
   "name": "@adonis-agora/config-core",
-  "version": "0.1.2",
+  "version": "1.0.0-rc.0",
   "description": "Document format, flattening, diffing and versioning for @adonis-agora/config.",
   "license": "MIT",
   "repository": {
