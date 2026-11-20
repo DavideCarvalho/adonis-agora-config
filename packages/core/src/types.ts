@@ -36,6 +36,11 @@ export interface ConfigEntryState {
   /** Reloadable entries are applied on a running tenant; the rest need a restart. */
   reloadable: boolean;
   description?: string;
+  /**
+   * ISO date of the write that first set this key; kept by every later write. Absent on entries
+   * written before it was recorded.
+   */
+  createdAt?: string;
   /** ISO date of the last write to this entry. */
   updatedAt: string;
   /** `actor ?? sub` of the last writer. */
@@ -160,6 +165,8 @@ export interface ScopeSummary extends ConfigScope {
   version: number;
   entries: number;
   secrets: number;
+  /** ISO date of the scope's first version, when known. */
+  createdAt?: string;
   updatedAt: string;
   updatedBy: string;
 }

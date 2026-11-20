@@ -36,9 +36,9 @@ export default defineConfig({
 
 | Table | Holds |
 | --- | --- |
-| `config_versions` | one row per version: the app, environment, label, version number, the entries as JSON, the fingerprint, who wrote it and why |
-| `config_audit` | one row per changed key (and per rollback and secret reveal): actor, action, before and after |
-| `config_tenant_keys` | the public X25519 keys tenant apps registered, for values sealed to them (never a private key) |
+| `config_versions` | one row per version: the app, environment, label, version number, the entries as JSON, the fingerprint, who wrote it, when (`created_at`) and why. Each entry carries `createdAt` (when the key was first set) and `updatedAt` / `updatedBy` (its last write) |
+| `config_audit` | one row per changed key (and per rollback and secret reveal): actor, action, before and after, and when (`at`) |
+| `config_tenant_keys` | the public X25519 keys tenant apps registered, for values sealed to them (never a private key), with `created_at` and `updated_at` (last activated or retired) |
 
 `stores.memory()` is for tests and local development. Secrets are sealed before either store sees
 them, so a dump of the memory store or of the table never holds a plain value. A value sealed to an
@@ -56,7 +56,9 @@ are created there as `agora.config_versions`, …; every query names the schema,
 `search_path` (safe behind PgBouncer). On SQLite there are no schemas: leave it unset.
 
 `autoCreateSchema: false` turns the boot-time DDL off when migrations own the tables (the migration
-stub in `stubs/database` takes the same `{ schema: 'agora' }`).
+stub in `stubs/database` takes the same `{ schema: 'agora' }`). When an upgrade adds a column, add a
+migration that calls `createConfigTables` again: it adds what an existing table lacks, `NULL`-able,
+without rewriting it. `node ace agora:doctor` lists missing columns (`config.schema-columns`).
 
 To announce changes to broker-backed tenants, add `transport: transports.redis(...)` or
 `transports.durable(...)`; the HTTP API stays mounted for browsers, the console and http tenants. See

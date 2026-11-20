@@ -25,6 +25,7 @@ export {
 export {
   ConfigAdmin,
   ConfigCursorError,
+  type DocumentStamps,
   type EntryFilters,
   type EntryRow,
   type EntrySort,
@@ -108,6 +109,7 @@ export {
   createConfigTables,
   dropConfigAuditIndexes,
   dropConfigTables,
+  missingConfigColumns,
 } from './store/schema.js';
 export type {
   AuditPosition,

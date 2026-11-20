@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import type { ApplicationService } from '@adonisjs/core/types';
 import type { ConfigConfig, TenantTopologyConfig } from '../define_config.js';
 import { getRuntime, hasRuntime } from '../services/accessor.js';
+import { LucidStore } from '../store/lucid_store.js';
+import { missingConfigColumns } from '../store/schema.js';
 import { createTenantClient } from '../topology/tenant_client.js';
 import { TenantUrl } from '../topology/tenant_url.js';
 import { resolveTenantToken } from '../topology/token.js';
@@ -368,6 +370,27 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
       return {
         status: 'ok',
         message: `${status.sealed} sealed secret(s) on active key ${status.activeKid}.`,
+      };
+    },
+  },
+  {
+    id: 'config.schema-columns',
+    lib: 'config',
+    title: 'Config tables have every column this version writes',
+    cost: 'cheap',
+    run: async (): Promise<AgoraDoctorResult> => {
+      if (!hasRuntime()) return { status: 'skip', message: 'The config runtime is not built yet.' };
+      const store = getRuntime().store;
+      if (!(store instanceof LucidStore)) {
+        return { status: 'skip', message: 'The config store is not the Lucid store.' };
+      }
+      const missing = await missingConfigColumns(store.db);
+      if (missing.length === 0) return { status: 'ok', message: 'The config tables are current.' };
+      return {
+        status: 'error',
+        message: `Missing columns: ${missing.join(', ')}.`,
+        fix: 'Turn autoCreateSchema back on, or add a migration that calls createConfigTables (it adds missing columns).',
+        docs: DOCS,
       };
     },
   },

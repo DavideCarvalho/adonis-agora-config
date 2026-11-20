@@ -13,8 +13,17 @@ export interface Entry {
   reloadable: boolean;
   description?: string;
   vault?: string;
+  /** When the key was first set; `null` (or absent, on older servers) when unknown. */
+  createdAt?: string | null;
   updatedAt: string;
   updatedBy: string;
+}
+
+/** The scope's current document: when it was first written and last changed. */
+export interface DocumentStamps {
+  version: number;
+  createdAt: string | null;
+  updatedAt: string;
 }
 
 export interface OffsetMeta {
@@ -204,7 +213,7 @@ export class ConfigApi {
   entries(
     scope: Scope,
     options: { search?: string; page?: number; size?: number; sort?: string } = {},
-  ): Promise<Page<Entry>> {
+  ): Promise<Page<Entry> & { document?: DocumentStamps | null }> {
     const query = new URLSearchParams({
       app: scope.app,
       environment: scope.environment,

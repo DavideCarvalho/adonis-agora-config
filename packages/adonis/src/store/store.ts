@@ -131,6 +131,11 @@ export interface TenantPublicKey {
   active: boolean;
   /** ISO date of when the registration was first seen. */
   createdAt: string;
+  /**
+   * ISO date of the last change (registered, activated or retired). Absent on keys registered
+   * before it was recorded.
+   */
+  updatedAt?: string;
   /** Who registered it (`tenant:<clientId>`, `cli:<user>`, …). */
   createdBy: string;
 }
@@ -401,6 +406,12 @@ export function applyChanges(
           : existing?.description !== undefined
             ? { description: existing.description }
             : {}),
+      // A new key is created now; an existing one keeps when it was (unknown on older entries).
+      ...(existing
+        ? existing.createdAt !== undefined
+          ? { createdAt: existing.createdAt }
+          : {}
+        : { createdAt: context.now }),
       updatedAt: context.now,
       updatedBy: context.actor,
     };
