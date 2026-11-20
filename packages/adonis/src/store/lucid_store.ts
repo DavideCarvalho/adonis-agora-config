@@ -579,9 +579,11 @@ export class LucidStore implements ConfigStore {
       active: unknown;
       created_by: string;
       created_at: string;
+      updated_at?: string | null;
     }>(
       this.db,
-      `SELECT app, kid, public_key, active, created_by, created_at FROM config_tenant_keys
+      // `SELECT *`: a federated console may read an app whose table predates `updated_at`.
+      `SELECT * FROM config_tenant_keys
        WHERE app = ? ORDER BY created_at DESC, id DESC`,
       [app],
     );
@@ -594,6 +596,7 @@ export class LucidStore implements ConfigStore {
       active: toNumber(row.active) === 1,
       createdBy: row.created_by,
       createdAt: row.created_at,
+      ...(row.updated_at ? { updatedAt: String(row.updated_at) } : {}),
     }));
   }
 
@@ -603,24 +606,31 @@ export class LucidStore implements ConfigStore {
       'SELECT id FROM config_tenant_keys WHERE app = ? AND kid = ? LIMIT 1',
       [key.app, key.kid],
     );
+    const now = this.#now();
     // One active key per app: deactivate the previous one, then activate this one when asked.
     if (key.active) {
-      await query(this.db, 'UPDATE config_tenant_keys SET active = 0 WHERE app = ?', [key.app]);
+      await query(
+        this.db,
+        // Only rows that change: a re-registered active key keeps its `updated_at`.
+        'UPDATE config_tenant_keys SET active = 0, updated_at = ? WHERE app = ? AND active = 1 AND kid <> ?',
+        [now, key.app, key.kid],
+      );
     }
     if (existing.length > 0) {
       if (key.active) {
-        await query(this.db, 'UPDATE config_tenant_keys SET active = 1 WHERE app = ? AND kid = ?', [
-          key.app,
-          key.kid,
-        ]);
+        await query(
+          this.db,
+          'UPDATE config_tenant_keys SET active = 1, updated_at = ? WHERE app = ? AND kid = ? AND active = 0',
+          [now, key.app, key.kid],
+        );
       }
       return { created: false };
     }
     try {
       await query(
         this.db,
-        `INSERT INTO config_tenant_keys (id, app, kid, public_key, active, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO config_tenant_keys (id, app, kid, public_key, active, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           randomUUID(),
           key.app,
@@ -628,6 +638,7 @@ export class LucidStore implements ConfigStore {
           jsonValue(key.publicKey),
           key.active ? 1 : 0,
           key.createdBy,
+          key.createdAt,
           key.createdAt,
         ],
       );

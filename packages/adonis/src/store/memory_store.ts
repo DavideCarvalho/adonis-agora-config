@@ -292,10 +292,19 @@ export class MemoryStore implements ConfigStore {
     const existing = keys.find((candidate) => candidate.kid === key.kid);
     if (key.active) {
       // Exactly one active key per app, even when the same key is re-registered.
-      for (const candidate of keys) candidate.active = candidate.kid === key.kid;
+      const now = new Date().toISOString();
+      for (const candidate of keys) {
+        const active = candidate.kid === key.kid;
+        if (candidate.active !== active) candidate.updatedAt = now;
+        candidate.active = active;
+      }
     }
     if (existing) return { created: false };
-    keys.push({ ...key, publicKey: { ...key.publicKey } });
+    keys.push({
+      ...key,
+      publicKey: { ...key.publicKey },
+      updatedAt: key.updatedAt ?? key.createdAt,
+    });
     this.#tenantKeys.set(key.app, keys);
     return { created: true };
   }

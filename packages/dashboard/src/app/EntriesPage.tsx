@@ -16,9 +16,18 @@ import {
 import { Input } from '../agora-kit/ui/input';
 import { Skeleton } from '../agora-kit/ui/skeleton';
 import { Textarea } from '../agora-kit/ui/textarea';
-import type { Entry, EntryInput } from '../client/config-client';
+import type { DocumentStamps, Entry, EntryInput } from '../client/config-client';
 import { useConsole } from './console-context';
-import { editorText, exactTime, parseEditorText, preview, relativeTime } from './format';
+import { editorText, exactTime, parseEditorText, preview, relativeTime, shortDate } from './format';
+
+/** A short date with the exact time on hover; `—` when unknown. */
+function DateText({ iso }: { iso: string | null | undefined }) {
+  return (
+    <span className="text-fg-2" title={iso ? exactTime(iso) : undefined}>
+      {shortDate(iso)}
+    </span>
+  );
+}
 
 function ValueCell({ entry }: { entry: Entry }) {
   if (entry.sealedTo !== undefined) {
@@ -256,6 +265,13 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
             />
           </label>
 
+          {editing ? (
+            <p className="text-[11px] text-faint" data-testid="entry-stamps">
+              Created <DateText iso={editing.createdAt} /> · Updated{' '}
+              <DateText iso={editing.updatedAt} /> by {editing.updatedBy}
+            </p>
+          ) : null}
+
           {error ? <p className="text-[11px] text-bad">{error.message}</p> : null}
         </div>
 
@@ -301,6 +317,13 @@ export const entriesParams = {
   page: parseAsInteger.withDefault(1).withOptions({ history: 'push' }),
 };
 
+/** "12 entries · v7 · created 5 Jan 2026 · updated 18 Nov 2026" over the entry list. */
+function documentLine(total: number, document: DocumentStamps | null | undefined): string {
+  const count = `${total} entries`;
+  if (!document) return count;
+  return `${count} · v${document.version} · created ${shortDate(document.createdAt)} · updated ${shortDate(document.updatedAt)}`;
+}
+
 export function EntriesPage() {
   const { api, scope, readOnly } = useConsole();
   const [{ q: search, page }, setView] = useQueryStates(entriesParams);
@@ -330,7 +353,7 @@ export function EntriesPage() {
 
       <Panel
         title="Configuration"
-        description={`${query.data?.meta.total ?? 0} entries`}
+        description={documentLine(query.data?.meta.total ?? 0, query.data?.document)}
         flush
         action={
           <Input

@@ -1,4 +1,12 @@
-import { dialectOf, inSchema, query, type SqlClient, type SqlDatabase, schemaOf } from '../sql.js';
+import {
+  type Dialect,
+  dialectOf,
+  inSchema,
+  query,
+  type SqlClient,
+  type SqlDatabase,
+  schemaOf,
+} from '../sql.js';
 
 /** Where the config tables live. `schema` is a Postgres schema / MySQL database. */
 export interface ConfigSchemaOptions {
@@ -42,9 +50,62 @@ const TABLES = [
     active integer NOT NULL,
     created_by varchar(255) NOT NULL,
     created_at varchar(32) NOT NULL,
+    updated_at varchar(32) NULL,
     CONSTRAINT config_tenant_keys_app_kid UNIQUE (app, kid)
   )`,
 ] as const;
+
+/**
+ * Columns added after a table first shipped: `CREATE TABLE IF NOT EXISTS` leaves an older table as
+ * it was, so {@link createConfigTables} adds whichever are missing. NULL-able with no default — an
+ * instant `ADD COLUMN`, no rewrite, no backfill (older rows read as unknown).
+ */
+const ADDED_COLUMNS: ReadonlyArray<readonly [table: string, column: string, type: string]> = [
+  ['config_tenant_keys', 'updated_at', 'varchar(32) NULL'],
+];
+
+/** The {@link ADDED_COLUMNS} an existing table lacks (a table that does not exist is skipped). */
+async function missingColumns(client: SqlClient, dialect: Dialect, schema: string | undefined) {
+  const tables = [...new Set(ADDED_COLUMNS.map(([table]) => table))];
+  const present = new Set<string>();
+  if (dialect === 'sqlite') {
+    for (const table of tables) {
+      for (const row of await query<{ name: string }>(client, `PRAGMA table_info(${table})`)) {
+        present.add(`${table}.${row.name}`);
+      }
+    }
+  } else {
+    // Table names travel as bindings, so the schema qualification leaves them alone.
+    const rows = await query<Record<string, string>>(
+      client,
+      dialect === 'postgres'
+        ? `SELECT table_name AS t, column_name AS c FROM information_schema.columns
+            WHERE table_schema = COALESCE(?, current_schema()) AND table_name IN (${tables.map(() => '?').join(', ')})`
+        : `SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.columns
+            WHERE TABLE_SCHEMA = COALESCE(?, DATABASE()) AND TABLE_NAME IN (${tables.map(() => '?').join(', ')})`,
+      [schema ?? null, ...tables],
+    );
+    for (const row of rows) present.add(`${row.t ?? row.T}.${row.c ?? row.C}`);
+  }
+  const existing = new Set([...present].map((entry) => entry.split('.')[0]));
+  return ADDED_COLUMNS.filter(
+    ([table, column]) => existing.has(table) && !present.has(`${table}.${column}`),
+  );
+}
+
+/**
+ * Columns this version writes that the existing tables lack, as `table.column` — what an app with
+ * `autoCreateSchema: false` must migrate (a migration calling {@link createConfigTables} adds
+ * them). Empty when the schema is current.
+ */
+export async function missingConfigColumns(
+  db: SqlClient,
+  options: ConfigSchemaOptions = {},
+): Promise<string[]> {
+  const client = inSchema(db, options.schema);
+  const missing = await missingColumns(client, dialectOf(client), schemaOf(client));
+  return missing.map(([table, column]) => `${table}.${column}`);
+}
 
 const DROPS = [
   'DROP TABLE IF EXISTS config_tenant_keys',
@@ -77,6 +138,18 @@ export async function createConfigTables(
     );
   }
   for (const sql of TABLES) await query(client, sql);
+  // Looked up first, so a current schema takes no ALTER lock at boot.
+  for (const [table, column, type] of await missingColumns(client, dialect, schema)) {
+    try {
+      await query(
+        client,
+        `ALTER TABLE ${table} ADD COLUMN ${dialect === 'postgres' ? 'IF NOT EXISTS ' : ''}${column} ${type}`,
+      );
+    } catch (error) {
+      // Another replica booting at the same time added it first.
+      if (!/duplicate column/i.test((error as Error).message)) throw error;
+    }
+  }
 }
 
 /** Drops every table this package owns (tests and the migration's `down`). */

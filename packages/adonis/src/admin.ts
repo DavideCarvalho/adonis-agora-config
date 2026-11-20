@@ -55,8 +55,23 @@ export interface SetEntryOptions {
   now?: string;
 }
 
-/** One entry as the console lists it: the view plus its map key. */
-export type EntryRow = ConfigEntryView & { key: string };
+/** The scope's current document, as the console's entry list carries it. */
+export interface DocumentStamps {
+  version: number;
+  /** ISO date of the scope's first version; `null` when the store cannot tell. */
+  createdAt: string | null;
+  /** ISO date of the current version (the last change). */
+  updatedAt: string;
+}
+
+/**
+ * One entry as the console lists it: the view plus its map key. `createdAt` is `null` on entries
+ * written before it was recorded.
+ */
+export type EntryRow = Omit<ConfigEntryView, 'createdAt'> & {
+  key: string;
+  createdAt: string | null;
+};
 
 export interface ConfigAdminOptions {
   store: ConfigStore;
@@ -155,15 +170,20 @@ export class ConfigAdmin {
         },
         canRead,
       ),
+      createdAt: entry.createdAt ?? null,
     };
   }
 
-  /** One page of entries, filtered and sorted in memory (a document is small by nature). */
+  /**
+   * One page of entries, filtered and sorted in memory (a document is small by nature), plus the
+   * scope's current document: its version, when the scope was first written and when it last
+   * changed (`null` when unknown, or when nothing was ever written).
+   */
   async listEntries(
     scope: ConfigScope,
     canReadSecrets: boolean,
     options: PageInput & { filters?: EntryFilters; sort?: EntrySort } = { page: 1, size: 50 },
-  ): Promise<OffsetPage<EntryRow>> {
+  ): Promise<OffsetPage<EntryRow> & { document: DocumentStamps | null }> {
     const document = await this.store.read(scope);
     const entries = Object.entries(document?.entries ?? {}).map(([key, entry]) =>
       this.#visible(key, entry, canReadSecrets),
@@ -192,11 +212,32 @@ export class ConfigAdmin {
         return sort.direction === 'asc' ? result : -result;
       });
     const start = (options.page - 1) * options.size;
-    return offsetPage(matching.slice(start, start + options.size), {
-      total: matching.length,
-      page: options.page,
-      size: options.size,
-    });
+    return {
+      ...offsetPage(matching.slice(start, start + options.size), {
+        total: matching.length,
+        page: options.page,
+        size: options.size,
+      }),
+      document: document
+        ? await this.#documentStamps(scope, document.version, document.createdAt)
+        : null,
+    };
+  }
+
+  /** The current document's dates: its first version's (via `seekVersions`) and its own. */
+  async #documentStamps(
+    scope: ConfigScope,
+    version: number,
+    updatedAt: string,
+  ): Promise<DocumentStamps> {
+    let createdAt: string | null = null;
+    try {
+      const [first] = (await this.store.seekVersions?.(scope, { limit: 1, order: 'asc' })) ?? [];
+      createdAt = first?.createdAt ?? null;
+    } catch {
+      // A store that cannot seek shows the creation date as unknown.
+    }
+    return { version, createdAt, updatedAt };
   }
 
   /** One entry. `reveal` records the read in the audit trail (the console's eye button). */
@@ -417,7 +458,7 @@ export class ConfigAdmin {
     if (!document) return null;
     const view = maskDocument(document, canReadSecrets);
     const entries = Object.entries(view.entries)
-      .map(([key, entry]) => ({ key, ...entry }))
+      .map(([key, entry]) => ({ key, ...entry, createdAt: entry.createdAt ?? null }))
       .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
     return {
       summary: {
