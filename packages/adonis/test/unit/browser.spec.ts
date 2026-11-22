@@ -141,7 +141,7 @@ describe('browser config', () => {
     expect(() => tenant({ keys: ['a'], route: 'config.json' })).toThrow(/starting with `\/`/);
     expect(() =>
       defineConfig({ topology: 'standalone', browser: { keys: ['a'] } } as never),
-    ).toThrow(/only applies to topology "tenant"/);
+    ).toThrow(/applies to a tenant/);
   });
 
   it('serves an entry marked browser on the control plane, without any pattern', async () => {

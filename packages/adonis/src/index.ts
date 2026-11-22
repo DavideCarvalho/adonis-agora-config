@@ -34,7 +34,9 @@ export {
 export { type BootstrapOptions, type BootstrapResult, bootstrapConfig } from './bootstrap.js';
 export {
   type BrowserConfig,
+  type BrowserDirectConfig,
   browserValues,
+  type ControlPlaneBrowserConfig,
   DEFAULT_BROWSER_CHANNEL,
   isBrowserKey,
 } from './browser.js';

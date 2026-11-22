@@ -1,6 +1,10 @@
 import type { ConfigValue, VaultReference } from '@adonis-agora/config-core';
 import type { ApplicationService } from '@adonisjs/core/types';
-import { assertBrowserConfig, type BrowserConfig } from './browser.js';
+import {
+  assertBrowserConfig,
+  type BrowserConfig,
+  type ControlPlaneBrowserConfig,
+} from './browser.js';
 import type { CryptoOptions, SecretCodec } from './crypto/secrets.js';
 import type { ConfigConsoleConfig } from './dashboard/define_config.js';
 import type { SqlDatabase } from './sql.js';
@@ -147,8 +151,16 @@ export interface ControlPlaneConfig extends BaseConfig {
    * http tenants always use it.
    */
   transport?: ConfigTransportFactory;
-  /** Tenant only: a standalone app or a control plane serves no values to its own pages. */
-  browser?: never;
+  /**
+   * Serve the tenants' pages directly (their `browser.direct`): each tenant mints short-lived
+   * tokens with a key this control plane derives for it, and its pages read their browser values
+   * here, cross-origin from `corsOrigins`.
+   *
+   * ```ts
+   * browser: { corsOrigins: ['https://app.example.com'] },
+   * ```
+   */
+  browser?: ControlPlaneBrowserConfig;
 }
 
 /** {@link StandaloneConfig.consoleCommands}. */
@@ -311,14 +323,21 @@ export function defineConfig(config: ConfigConfig): ConfigConfig {
       );
     }
   }
-  const browser = (config as { browser?: BrowserConfig }).browser;
+  const browser = (config as { browser?: unknown }).browser;
   if (browser !== undefined) {
-    if (config.topology !== 'tenant') {
+    if (config.topology === 'tenant') assertBrowserConfig(browser as BrowserConfig);
+    else if (config.topology === 'control-plane') {
+      const origins = (browser as ControlPlaneBrowserConfig).corsOrigins;
+      if (!Array.isArray(origins) || origins.some((origin) => !/^https?:\/\/[^/]+$/.test(origin))) {
+        throw new Error(
+          'config: browser.corsOrigins must list the origins of the pages (`https://app.example.com`, no path)',
+        );
+      }
+    } else {
       throw new Error(
-        'config: `browser` only applies to topology "tenant" (the app that reads its configuration)',
+        "config: `browser` applies to a tenant (its pages) or a control plane (serving tenants' pages directly)",
       );
     }
-    assertBrowserConfig(browser);
   }
   if (config.topology !== 'control-plane' && raw.verifyTenant !== undefined) {
     throw new Error('config: `verifyTenant` only applies to topology "control-plane"');

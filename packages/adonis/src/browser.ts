@@ -23,6 +23,31 @@ export interface BrowserConfig {
    * them as Inertia props (`route: '/_config/browser'`). Off when omitted.
    */
   route?: string;
+  /**
+   * The direct mode: pages read the values from the control plane itself, with a short-lived token
+   * this app mints at `tokenRoute` (default `/_config/browser-token`). The control plane needs
+   * `browser` in its own config/config.ts. `publicUrl` is the control plane's address as browsers
+   * reach it, when it differs from `tenant.url`.
+   */
+  direct?: boolean | BrowserDirectConfig;
+}
+
+/** {@link BrowserConfig.direct}. */
+export interface BrowserDirectConfig {
+  /** Default `/_config/browser-token`. */
+  tokenRoute?: string;
+  /** Token lifetime. Default 600 seconds. */
+  ttlSeconds?: number;
+  /** The control plane as browsers reach it (`https://hub.example.com/_config`). Default `tenant.url`. */
+  publicUrl?: string;
+}
+
+/** `browser` on a control plane: serve browsers of every tenant directly. */
+export interface ControlPlaneBrowserConfig {
+  /** Origins of the tenants' pages (`https://app.example.com`). */
+  corsOrigins: string[];
+  /** Signs the per-app token keys. Default: the app key (APP_KEY). */
+  secret?: string;
 }
 
 /** What {@link browserValues} reads from a tenant client. */
@@ -97,5 +122,12 @@ export function assertBrowserConfig(config: BrowserConfig): void {
   }
   if (config.route !== undefined && !config.route.startsWith('/')) {
     throw new Error('config: browser.route must be a path starting with `/`');
+  }
+  const direct = typeof config.direct === 'object' ? config.direct : undefined;
+  if (direct?.tokenRoute !== undefined && !direct.tokenRoute.startsWith('/')) {
+    throw new Error('config: browser.direct.tokenRoute must be a path starting with `/`');
+  }
+  if (direct?.publicUrl !== undefined && !/^https?:\/\//.test(direct.publicUrl)) {
+    throw new Error('config: browser.direct.publicUrl must be an absolute http(s) URL');
   }
 }

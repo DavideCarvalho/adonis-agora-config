@@ -10,6 +10,7 @@ import {
   envValueOf,
   unflattenObject,
 } from '@adonis-agora/config-core';
+import type { BrowserKey } from '../browser_token.js';
 import { entryAad } from '../crypto/secrets.js';
 import type { ConfigTransport } from '../transports/types.js';
 import type { TenantKeyring } from './tenant_keyring.js';
@@ -196,6 +197,9 @@ export class TenantClient {
   #keysError: string | undefined;
   #sealed = { sealed: 0, unreadable: 0, staleKids: [] as string[] };
   readonly #url: TenantUrl;
+
+  #browserKey: { value: BrowserKey; until: number } | undefined;
+  #browserKeyLoad: Promise<BrowserKey> | undefined;
 
   constructor(private readonly options: TenantClientOptions) {
     this.#url = new TenantUrl(options.url);
@@ -567,6 +571,42 @@ export class TenantClient {
       skipped,
       version: result.version,
     };
+  }
+
+  /**
+   * The key this app signs browser tokens with (the direct mode), from the control plane's
+   * `POST /v1/browser-key`. Cached for an hour; concurrent callers share one request.
+   */
+  async browserKey(): Promise<BrowserKey> {
+    if (this.#browserKey && this.#browserKey.until > Date.now()) return this.#browserKey.value;
+    this.#browserKeyLoad ??= (async () => {
+      const send = async () => {
+        const headers = this.#headers();
+        headers.authorization = await this.#authorization();
+        return this.#send('/v1/browser-key', (url) =>
+          this.#request(url, { method: 'POST', headers }),
+        );
+      };
+      let response = await send();
+      if (response.status === 401) {
+        this.#token.reset?.();
+        response = await send();
+      }
+      if (response.status === 404) {
+        throw new Error(
+          'config: the control plane does not serve browsers (set `browser` in its config/config.ts)',
+        );
+      }
+      if (!response.ok) {
+        throw new Error(`config: the control plane answered ${response.status} on /v1/browser-key`);
+      }
+      const value = (await response.json()) as BrowserKey;
+      this.#browserKey = { value, until: Date.now() + 3_600_000 };
+      return value;
+    })().finally(() => {
+      this.#browserKeyLoad = undefined;
+    });
+    return this.#browserKeyLoad;
   }
 
   /** The age of the snapshot file on disk, or null when there is none (used by the doctor). */

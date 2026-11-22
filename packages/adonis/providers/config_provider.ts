@@ -2,7 +2,13 @@ import { fileURLToPath } from 'node:url';
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ApplicationService } from '@adonisjs/core/types';
 import { ConfigAdmin } from '../src/admin.js';
-import { browserChannel, browserValues, changesBrowser } from '../src/browser.js';
+import {
+  browserChannel,
+  browserValues,
+  type ControlPlaneBrowserConfig,
+  changesBrowser,
+} from '../src/browser.js';
+import { signBrowserToken } from '../src/browser_token.js';
 import {
   type CryptoOptions,
   createConfigKeyring,
@@ -321,6 +327,7 @@ export default class ConfigProvider {
         ...(config.corsOrigins ? { corsOrigins: config.corsOrigins } : {}),
         ...(config.vault ? { vault: config.vault.resolve } : {}),
         ...(transport ? { transport } : {}),
+        ...(config.browser ? { browser: this.#browserServing(config.browser) } : {}),
         logger,
       });
     }
@@ -613,6 +620,21 @@ export default class ConfigProvider {
    * `browser` in config/config.ts: the optional GET route, and the transmit broadcast when a key the
    * browser reads changes. Neither runs in ace: a command serves no page.
    */
+  /** A control plane's `browser`: the origins, and the secret token keys derive from. */
+  #browserServing(browser: ControlPlaneBrowserConfig): {
+    secret: string;
+    corsOrigins: readonly string[];
+  } {
+    const appKey = this.#appKey();
+    const secret = browser.secret ?? (typeof appKey === 'string' ? appKey : appKey?.release());
+    if (!secret) {
+      throw new Error(
+        '[@adonis-agora/config] `browser` needs a secret: set `browser.secret`, or APP_KEY',
+      );
+    }
+    return { secret, corsOrigins: browser.corsOrigins };
+  }
+
   async #browser(runtime: ConfigRuntime, logger: { warn(message: string): void }): Promise<void> {
     const config = this.app.config.get<ConfigConfig | undefined>('config');
     const browser = config?.topology === 'tenant' ? config.browser : undefined;
@@ -630,6 +652,32 @@ export default class ConfigProvider {
             return { version: client.status().version, values: runtime.browser() };
           })
           .as('agora_config.browser');
+      });
+    }
+    if (browser.direct) {
+      const direct = typeof browser.direct === 'object' ? browser.direct : {};
+      const keys = browser.keys ?? [];
+      await this.app.booted(async () => {
+        const router = (await this.app.container.make('router')) as unknown as {
+          get(path: string, handler: (ctx: HttpContext) => unknown): { as(name: string): unknown };
+        };
+        router
+          .get(direct.tokenRoute ?? '/_config/browser-token', async (ctx: HttpContext) => {
+            ctx.response.header('cache-control', 'no-store');
+            try {
+              const issued = signBrowserToken(await client.browserKey(), {
+                keys,
+                ...(direct.ttlSeconds !== undefined ? { ttlSeconds: direct.ttlSeconds } : {}),
+              });
+              return { ...issued, url: direct.publicUrl ?? (await client.resolveUrl()) };
+            } catch (error) {
+              logger.warn(
+                `[@adonis-agora/config] issuing a browser token failed: ${(error as Error).message}`,
+              );
+              return ctx.response.status(503).send({ error: 'config unavailable' });
+            }
+          })
+          .as('agora_config.browser_token');
       });
     }
     const channel = browserChannel(browser);
@@ -725,6 +773,7 @@ export default class ConfigProvider {
   }
 
   async shutdown(): Promise<void> {
+    this.#runtime?.controlPlane?.close();
     await this.#consoleChannel?.close();
     this.#consoleChannel = undefined;
     await this.#federated?.close();

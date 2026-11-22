@@ -166,3 +166,107 @@ export function useConfigSnapshot(): Readonly<ConfigValues> {
   const values = useConfigValues();
   return useMemo(() => Object.freeze({ ...values }), [values]);
 }
+
+/** What the app's token route answers (`browser.direct` in its config/config.ts). */
+export interface BrowserTokenResponse {
+  token: string;
+  /** Epoch ms. */
+  expiresAt: number;
+  /** The control plane's base URL (`https://hub.example.com/_config`). */
+  url: string;
+}
+
+/** The part of `EventSource` the direct mode uses. */
+export interface EventSourceLike {
+  addEventListener(type: string, listener: () => void): void;
+  onerror: ((event: unknown) => void) | null;
+  close(): void;
+}
+
+export interface DirectConfigProviderProps {
+  /** The app's token route. Default `/_config/browser-token`. */
+  tokenUrl?: string;
+  /** Values to render before the first response. */
+  initialValues?: ConfigValues;
+  /** Follow changes over the control plane's stream. Default `true`. */
+  live?: boolean;
+  /** Delay before reconnecting after the stream drops (ms). Default 5000. */
+  retryMs?: number;
+  /** Default: the global `fetch`. */
+  fetch?: typeof fetch;
+  /** Default: the global `EventSource`. */
+  EventSource?: new (
+    url: string,
+  ) => EventSourceLike;
+  children: ReactNode;
+}
+
+/**
+ * The direct mode: reads the values from the control plane itself, with a short-lived token from
+ * the app (`browser.direct`), and follows changes over the control plane's stream. When the token
+ * expires the stream closes, and the provider fetches a new token and reconnects. A failure keeps
+ * the values the page has.
+ */
+export function DirectConfigProvider({
+  tokenUrl = '/_config/browser-token',
+  initialValues,
+  live = true,
+  retryMs = 5000,
+  fetch: fetcher,
+  EventSource: Source,
+  children,
+}: DirectConfigProviderProps) {
+  const [values, setValues] = useState<ConfigValues>(initialValues ?? {});
+  useEffect(() => {
+    const doFetch = fetcher ?? globalThis.fetch;
+    const Stream =
+      Source ?? (globalThis as { EventSource?: new (url: string) => EventSourceLike }).EventSource;
+    let stopped = false;
+    let source: EventSourceLike | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let latest = 0;
+    const load = async (issued: BrowserTokenResponse) => {
+      const request = ++latest;
+      const response = await doFetch(`${issued.url}/v1/browser/values`, {
+        headers: { authorization: `Bearer ${issued.token}`, accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`config: ${response.status}`);
+      const body = (await response.json()) as { values?: ConfigValues };
+      if (!stopped && request === latest && body.values) setValues(body.values);
+    };
+    const connect = async () => {
+      try {
+        const response = await doFetch(tokenUrl, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json' },
+        });
+        if (!response.ok) throw new Error(`config: token ${response.status}`);
+        const issued = (await response.json()) as BrowserTokenResponse;
+        if (stopped) return;
+        await load(issued);
+        if (stopped || !live || !Stream) return;
+        source = new Stream(
+          `${issued.url}/v1/browser/stream?token=${encodeURIComponent(issued.token)}`,
+        );
+        source.addEventListener('config', () => {
+          load(issued).catch(() => {});
+        });
+        // A dropped stream, or the token's expiry: start over with a new token.
+        source.onerror = () => {
+          source?.close();
+          source = undefined;
+          if (!stopped) retry = setTimeout(() => void connect(), retryMs);
+        };
+      } catch {
+        if (!stopped && live) retry = setTimeout(() => void connect(), retryMs);
+      }
+    };
+    void connect();
+    return () => {
+      stopped = true;
+      clearTimeout(retry);
+      source?.close();
+    };
+  }, [tokenUrl, live, retryMs, fetcher, Source]);
+  return <ConfigProvider values={values}>{children}</ConfigProvider>;
+}

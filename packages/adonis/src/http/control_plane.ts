@@ -15,6 +15,7 @@ import {
   parseVaultReference,
 } from '@adonis-agora/config-core';
 import type { HttpContext } from '@adonisjs/core/http';
+import { browserKeyOf } from '../browser_token.js';
 import {
   registerTenantKeys,
   resealTenantEntries,
@@ -31,6 +32,7 @@ import {
   type VerifiedTenant,
 } from '../topology/verify.js';
 import type { ConfigTransport } from '../transports/types.js';
+import { BrowserApi } from './browser_api.js';
 
 interface RouterLike {
   get(pattern: string, handler: (ctx: HttpContext) => unknown): { as(name: string): unknown };
@@ -90,6 +92,8 @@ export interface ControlPlaneOptions {
   bus?: ChangeBus;
   /** Broker transport for tenants that watch over redis/durable; the HTTP API is always mounted. */
   transport?: ConfigTransport;
+  /** Serve browsers directly (`browser` in config/config.ts): the browser-key route and API. */
+  browser?: { secret: string; corsOrigins: readonly string[] };
 }
 
 const presence = new Map<string, TenantPresence>();
@@ -117,10 +121,26 @@ export function resetKnownTenants(): void {
 export class ControlPlane {
   readonly prefix: string;
   readonly bus: ChangeBus;
+  /** The browser API, when `browser` is configured. */
+  readonly browser: BrowserApi | undefined;
 
   constructor(private readonly options: ControlPlaneOptions) {
     this.prefix = (options.prefix ?? '/_config').replace(/\/$/, '');
     this.bus = options.bus ?? new ChangeBus();
+    this.browser = options.browser
+      ? new BrowserApi({
+          store: options.store,
+          bus: this.bus,
+          secret: options.browser.secret,
+          corsOrigins: options.browser.corsOrigins,
+          ...(options.logger ? { logger: options.logger } : {}),
+        })
+      : undefined;
+  }
+
+  /** Stops the browser streams' watchers. */
+  close(): void {
+    this.browser?.close();
   }
 
   register(router: RouterLike): void {
@@ -131,6 +151,10 @@ export class ControlPlane {
     this.#route(router, `${p}/v1/keys`, 'GET', (ctx) => this.getKeys(ctx));
     this.#route(router, `${p}/v1/keys`, 'PUT', (ctx) => this.putKeys(ctx));
     this.#route(router, `${p}/v1/sealed`, 'POST', (ctx) => this.postSealed(ctx));
+    if (this.browser) {
+      this.#route(router, `${p}/v1/browser-key`, 'POST', (ctx) => this.postBrowserKey(ctx));
+      this.browser.register(router, p);
+    }
     if (this.options.corsOrigins?.length && router.route) {
       for (const path of ['config', 'config/stream', 'whoami', 'keys']) {
         router.route(`${p}/v1/${path}`, ['OPTIONS'], (ctx) => this.preflight(ctx));
@@ -448,6 +472,23 @@ export class ControlPlane {
       this.options.logger?.debug?.(`[@adonis-agora/config] re-seal refused: ${message}`);
       return ctx.response.status(400).send({ error: message });
     }
+  }
+
+  /**
+   * The key this tenant signs its browser tokens with, derived from the control plane's secret and
+   * the token's scope: a tenant only ever gets the key of its own scope.
+   */
+  async postBrowserKey(ctx: HttpContext) {
+    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
+    if (!verified) return;
+    const scope = this.#scope(verified, ctx);
+    ctx.response.header('cache-control', 'no-store');
+    return ctx.response.json({
+      key: browserKeyOf(this.options.browser!.secret, scope),
+      app: scope.app,
+      environment: scope.environment,
+      label: scope.label,
+    });
   }
 
   /** SSE: `event: config` on every change; closes when the token expires. */

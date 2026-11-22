@@ -147,3 +147,51 @@ page already has. Pass `initialValues` to render server-side values before the f
 
 Outside React, subscribe with `@adonisjs/transmit-client` and fetch the route when a message
 arrives.
+
+## Reading straight from the control plane
+
+By default pages get their values through the app. In the direct mode, pages read them from the
+control plane itself, with a short-lived token the app mints; the app serves no values.
+
+On the control plane:
+
+```ts title="config/config.ts"
+export default defineConfig({
+  topology: 'control-plane',
+  // …
+  browser: { corsOrigins: ['https://app.example.com'] },
+})
+```
+
+On the app:
+
+```ts title="config/config.ts"
+browser: {
+  keys: ['support.*'],
+  direct: { publicUrl: 'https://hub.example.com/_config' },
+},
+```
+
+```tsx
+import { DirectConfigProvider, useConfig } from '@adonis-agora/config-client/react'
+
+<DirectConfigProvider>
+  <Banner />
+</DirectConfigProvider>
+```
+
+| Control plane `browser` | Default | |
+| --- | --- | --- |
+| `corsOrigins` | — | the origins of the apps' pages (`https://app.example.com`) |
+| `secret` | the app key | what the per-app token keys derive from |
+
+| App `browser.direct` | Default | |
+| --- | --- | --- |
+| `tokenRoute` | `/_config/browser-token` | the route pages get a token from |
+| `ttlSeconds` | `600` | token lifetime; the page fetches a new one when it expires |
+| `publicUrl` | `tenant.url` | the control plane as browsers reach it |
+
+The token names the app, its environment and label, and the keys listed in `browser.keys`: a page
+reads that app's values and nothing else. The control plane serves its latest values, so a boot-time
+key shows its new value right away, unlike the app's `config.browser()`. Changes arrive over the
+control plane's stream; one watcher per app serves every open page.
