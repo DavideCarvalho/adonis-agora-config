@@ -365,7 +365,23 @@ export class ConfigConsole {
     return (allowed === undefined || allowed.includes(app)) && this.#granted(ctx, app);
   }
 
+  /** The `actor` hook's answer when it names someone, else the structural default. */
   async #actor(ctx: HttpContext): Promise<ConsoleActor> {
+    const hook = this.options.config.actor;
+    if (hook) {
+      try {
+        const answer = await hook(ctx);
+        const actor = typeof answer === 'string' ? { id: answer } : answer;
+        const id = typeof actor?.id === 'string' ? actor.id.trim() : '';
+        if (id !== '') {
+          const email =
+            typeof actor?.email === 'string' && actor.email !== '' ? actor.email : undefined;
+          return { id, ...(email ? { email } : {}) };
+        }
+      } catch {
+        // A failing hook records the default actor rather than failing the write.
+      }
+    }
     return consoleActor(ctx);
   }
 

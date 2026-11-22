@@ -82,6 +82,27 @@ console joins the `'agora.consoles'` registry as `config`, so every other Agora 
 "Configuration" and searches entry keys. With authkit-client, sign-out and the viewer row appear
 with no per-console config; without it, set `console.signOut` and `console.viewer` yourself.
 
+## Who the audit records
+
+Every change and reveal made in the console records an actor. By default that is the authkit-client
+identity, else `ctx.auth.user`, else `console`. When people sign in some other way, say who they
+are with `console.actor`. For example, on a Hub that uses the authkit console session:
+
+```ts title="config/config.ts"
+import { realAccountId } from '@adonis-agora/authkit-server'
+
+export default defineConfig({
+  topology: 'control-plane',
+  // ...
+  console: {
+    authorize: hubAdminAuthorize,
+    actor: (ctx) => ({ id: realAccountId(ctx) }),
+  },
+})
+```
+
+If the hook returns no `id`, or throws, the default actor is recorded.
+
 ## Which apps a viewer sees
 
 `console.apps` limits the console to a set of apps: the pickers list them and an API request for
