@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 1.0.0-rc.4
+
+### Patch Changes
+
+- [#39](https://github.com/DavideCarvalho/adonis-agora-config/pull/39) [`bcfe11b`](https://github.com/DavideCarvalho/adonis-agora-config/commit/bcfe11b59f7c3b1a2c7307a6802712142d218211) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Console: new `console.actor` option, which says who the audit trail records for a change or a reveal made in the console. Use it when people do not sign in through authkit-client, for example `actor: (ctx) => ({ id: realAccountId(ctx) })` on a Hub. Without it, the console records the authkit identity, else `ctx.auth.user`, else `console`.
+
 ## 1.0.0-rc.3
 
 ### Patch Changes
