@@ -332,6 +332,7 @@ function sameEntry(a: ConfigEntryState | undefined, b: ConfigEntryState | undefi
   return (
     a.secret === b.secret &&
     a.reloadable === b.reloadable &&
+    (a.browser === true) === (b.browser === true) &&
     (a.description ?? '') === (b.description ?? '') &&
     (a.vault ?? '') === (b.vault ?? '') &&
     JSON.stringify(a.sealedTo ?? null) === JSON.stringify(b.sealedTo ?? null) &&
@@ -368,6 +369,7 @@ function normalizeInput(input: ConfigEntryInput): ConfigEntryInput {
     ...(input.sealedTo !== undefined ? { sealedTo: input.sealedTo } : {}),
     ...(input.secret !== undefined ? { secret: input.secret } : {}),
     ...(input.reloadable !== undefined ? { reloadable: input.reloadable } : {}),
+    ...(input.browser !== undefined ? { browser: input.browser } : {}),
     ...(input.description !== undefined ? { description: input.description } : {}),
   };
 }
@@ -399,6 +401,7 @@ export function applyChanges(
       ...(input.sealedTo !== undefined ? { sealedTo: input.sealedTo as ConfigSealedTo } : {}),
       secret: input.secret ?? existing?.secret ?? input.vault !== undefined,
       reloadable: input.reloadable ?? existing?.reloadable ?? false,
+      ...((input.browser ?? existing?.browser) === true ? { browser: true } : {}),
       ...(input.description === null
         ? {}
         : input.description !== undefined
@@ -415,6 +418,11 @@ export function applyChanges(
       updatedAt: context.now,
       updatedBy: context.actor,
     };
+    if (next.browser && (next.secret || next.vault !== undefined || next.sealedTo !== undefined)) {
+      throw new Error(
+        `config: entry "${input.key}" is a secret and cannot be sent to the browser; unmark browser first`,
+      );
+    }
     entries[input.key] = next;
     touched.push({ key: input.key, ...(existing ? { before: existing } : {}), after: next });
   }

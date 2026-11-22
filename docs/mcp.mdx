@@ -13,7 +13,7 @@ call is authorized by the console's `authorize`.
 | Tool | |
 | --- | --- |
 | `config_list_scopes` | apps, environments and labels that hold something |
-| `config_list_entries` | entries of a scope, with `search`, `secret`, `reloadable`; `{ items, next }` |
+| `config_list_entries` | entries of a scope, with `search`, `secret`, `reloadable`, `browser`; `{ items, next }` |
 | `config_get_entry` | one entry; a secret is masked unless the console may reveal it, and the reveal is audited |
 | `config_list_versions` | immutable versions, newest first; `{ items, next }` |
 | `config_get_version` | one version exactly as it was |
@@ -26,7 +26,7 @@ These are hidden and uncallable unless the app opts in on the dev endpoint:
 
 | Tool | |
 | --- | --- |
-| `config_set_entry` | value or vault reference, secret/reloadable flags, reason |
+| `config_set_entry` | value or vault reference, secret/reloadable/browser flags, reason |
 | `config_unset_entry` | remove an entry (destructive) |
 | `config_rollback` | copy a past version into a new one (destructive) |
 

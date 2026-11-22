@@ -17,6 +17,9 @@ export class ConfigEntryList extends ConfigCommand {
   @flags.boolean({ description: 'Only reloadable entries' })
   declare reloadable: boolean;
 
+  @flags.boolean({ description: "Only entries the app's pages may read" })
+  declare browser: boolean;
+
   @flags.number({ description: 'Page number (1-based). Default 1' })
   declare page?: number;
 
@@ -35,6 +38,7 @@ export class ConfigEntryList extends ConfigCommand {
         ...(this.search !== undefined ? { search: this.search } : {}),
         ...(this.secret === true ? { secret: true } : {}),
         ...(this.reloadable === true ? { reloadable: true } : {}),
+        ...(this.browser === true ? { browser: true } : {}),
       },
     });
     this.output({ scope, ...result }, () => {
@@ -90,7 +94,7 @@ export class ConfigEntryGet extends ConfigCommand {
               : formatValue(entry.value),
       );
       this.logger.info(
-        `${entry.secret ? 'secret' : 'plain'} · ${entry.reloadable ? 'reloadable' : 'needs a restart'} · ${entry.updatedBy} · ${entry.updatedAt}`,
+        `${entry.secret ? 'secret' : 'plain'} · ${entry.reloadable ? 'reloadable' : 'needs a restart'}${entry.browser ? ' · browser' : ''} · ${entry.updatedBy} · ${entry.updatedAt}`,
       );
     });
   }
@@ -128,6 +132,11 @@ export class ConfigEntrySet extends ConfigCommand {
   @flags.boolean({ description: 'Apply on a running tenant without a restart' })
   declare reloadable: boolean;
 
+  @flags.boolean({
+    description: "Let the app's pages read it (config.browser()); refused on a secret",
+  })
+  declare browser: boolean;
+
   @flags.string({ description: 'A short description' })
   declare description?: string;
 
@@ -158,6 +167,7 @@ export class ConfigEntrySet extends ConfigCommand {
         ...(this.sealed === true ? { sealedTo: true, secret: true } : {}),
         ...(this.secret === true ? { secret: true } : {}),
         ...(this.reloadable === true ? { reloadable: true } : {}),
+        ...(this.browser === true ? { browser: true } : {}),
         ...(this.description !== undefined ? { description: this.description } : {}),
       },
       { actor: cliActor(), ...(this.message !== undefined ? { message: this.message } : {}) },

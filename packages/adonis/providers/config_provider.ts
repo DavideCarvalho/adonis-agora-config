@@ -640,9 +640,16 @@ export default class ConfigProvider {
           default: { broadcast(channel: string, payload: Record<string, unknown>): void };
         }
       ).default;
-      const keys = browser.keys;
+      const keys = browser.keys ?? [];
+      // What the browser read before this change: unmarking a key must reach open pages too.
+      let before = new Set(Object.keys(runtime.browser()));
       client.onChange((change) => {
-        if (changesBrowser(change, keys)) transmit.broadcast(channel, { version: change.version });
+        const now = new Set(Object.keys(runtime.browser()));
+        const was = before;
+        before = now;
+        if (changesBrowser(change, keys, (key) => was.has(key) || now.has(key))) {
+          transmit.broadcast(channel, { version: change.version });
+        }
       });
     } catch {
       logger.warn(

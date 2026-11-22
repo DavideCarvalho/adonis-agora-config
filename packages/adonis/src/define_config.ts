@@ -240,8 +240,9 @@ export interface TenantTopologyConfig extends BaseConfig {
     transport?: ConfigTransportFactory;
   };
   /**
-   * The keys this app's pages may read (`config.browser()`, `@adonis-agora/config-react`), and
-   * whether a change reaches open pages live:
+   * What this app's pages may read (`config.browser()`, `@adonis-agora/config-client/react`): the
+   * entries marked `browser` on the control plane plus `keys`, and whether a change reaches open
+   * pages live:
    *
    * ```ts
    * browser: { keys: ['site.banner', 'support.*'], realtime: true },

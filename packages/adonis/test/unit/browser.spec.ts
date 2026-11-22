@@ -143,4 +143,73 @@ describe('browser config', () => {
       defineConfig({ topology: 'standalone', browser: { keys: ['a'] } } as never),
     ).toThrow(/only applies to topology "tenant"/);
   });
+
+  it('serves an entry marked browser on the control plane, without any pattern', async () => {
+    const store = memoryConfig();
+    await seedConfig(store, testScope, [
+      { key: 'site.banner', value: 'hi', browser: true, reloadable: true },
+      ['site.title', 'Shop'],
+    ]);
+    const client = await tenantOf(store);
+    expect(browserValues(client, [])).toEqual({ 'site.banner': 'hi' });
+
+    // Unmarking is a change the browser sees (its value disappears).
+    const seen: boolean[] = [];
+    client.onChange((change) =>
+      seen.push(changesBrowser(change, [], (key) => key === 'site.banner')),
+    );
+    await store.write(testScope, [{ key: 'site.banner', value: 'hi', browser: false }], {
+      actor: 'ann',
+      now: new Date().toISOString(),
+    });
+    await client.refresh();
+    expect(browserValues(client, [])).toEqual({});
+    expect(seen).toEqual([true]);
+  });
+
+  it('refuses to mark a secret, a vault reference or a sealed entry', async () => {
+    const store = memoryConfig();
+    const now = new Date().toISOString();
+    await expect(
+      store.write(testScope, [{ key: 'stripe.key', value: 'sk', secret: true, browser: true }], {
+        actor: 'ann',
+        now,
+      }),
+    ).rejects.toThrow(/cannot be sent to the browser/);
+    await expect(
+      store.write(testScope, [{ key: 'db.pass', vault: 'vault://aws/db#pass', browser: true }], {
+        actor: 'ann',
+        now,
+      }),
+    ).rejects.toThrow(/cannot be sent to the browser/);
+    // Turning a marked entry into a secret is refused too: unmark first.
+    await store.write(testScope, [{ key: 'site.token', value: 't', browser: true }], {
+      actor: 'ann',
+      now,
+    });
+    await expect(
+      store.write(testScope, [{ key: 'site.token', value: 't', secret: true }], {
+        actor: 'ann',
+        now,
+      }),
+    ).rejects.toThrow(/unmark browser first/);
+  });
+
+  it('keeps the fingerprint of an unmarked document, and changes it when marking', async () => {
+    const store = memoryConfig();
+    const now = new Date().toISOString();
+    const first = await store.write(testScope, [{ key: 'a', value: 1 }], { actor: 'ann', now });
+    const same = await store.write(testScope, [{ key: 'a', value: 1, browser: false }], {
+      actor: 'ann',
+      now,
+    });
+    expect(same.changed).toBe(false);
+    const marked = await store.write(testScope, [{ key: 'a', value: 1, browser: true }], {
+      actor: 'ann',
+      now,
+    });
+    expect(marked.changed).toBe(true);
+    expect(marked.document.fingerprint).not.toBe(first.document.fingerprint);
+    expect(marked.document.entries.a?.browser).toBe(true);
+  });
 });

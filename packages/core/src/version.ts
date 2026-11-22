@@ -19,6 +19,8 @@ export function fingerprintOf(entries: Record<string, ConfigEntryState>): string
             sealedTo: entry.sealedTo ?? null,
             secret: entry.secret,
             reloadable: entry.reloadable,
+            // Only when set, so the fingerprint of every version written before it is unchanged.
+            ...(entry.browser === true ? { browser: true } : {}),
             description: entry.description ?? null,
           },
         ]),

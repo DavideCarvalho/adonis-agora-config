@@ -70,6 +70,7 @@ const columns: Column<Entry>[] = [
         ) : (
           <Badge variant="neutral">restart</Badge>
         )}
+        {entry.browser ? <Badge variant="info">browser</Badge> : null}
       </span>
     ),
   },
@@ -95,6 +96,9 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
   const [secret, setSecret] = useState(editing?.secret ?? false);
   const [sealedTo, setSealedTo] = useState(editing?.sealedTo !== undefined);
   const [reloadable, setReloadable] = useState(editing?.reloadable ?? false);
+  const [browser, setBrowser] = useState(editing?.browser === true);
+  // A secret, sealed or vault-backed value never goes to the browser: the server refuses it too.
+  const hidden = secret || sealedTo || vault.trim() !== '';
   const [description, setDescription] = useState(editing?.description ?? '');
   const [message, setMessage] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -112,6 +116,7 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
         secret,
         sealedTo,
         reloadable,
+        browser: browser && !hidden,
         ...(description.trim() !== ''
           ? { description: description.trim() }
           : { description: null }),
@@ -152,7 +157,8 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
             {scope.app} / {scope.environment} / {scope.label}. A reloadable key applies on a running
             tenant; the rest need a restart. A secret is encrypted at rest and served only with{' '}
             <span className="mono">config:secrets:read</span>. Sealing a value for the app means the
-            control plane can never read it again.
+            control plane can never read it again. A browser key reaches the app's pages; a secret
+            never does.
           </DialogDescription>
         </DialogHeader>
 
@@ -243,6 +249,20 @@ function EntryEditor({ entry, onClose }: { entry: Entry | 'new' | null; onClose:
                 onChange={(event) => setReloadable(event.target.checked)}
               />
               reloadable
+            </label>
+            <label
+              className="flex items-center gap-2"
+              title={
+                hidden ? 'A secret, sealed or vault value never goes to the browser' : undefined
+              }
+            >
+              <input
+                type="checkbox"
+                checked={browser && !hidden}
+                disabled={hidden}
+                onChange={(event) => setBrowser(event.target.checked)}
+              />
+              browser
             </label>
           </div>
 

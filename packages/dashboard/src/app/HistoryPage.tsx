@@ -210,6 +210,7 @@ export function HistoryPage() {
           {entry.secret ? <Badge variant="warn">secret</Badge> : null}
           {entry.sealedTo !== undefined ? <Badge variant="info">sealed</Badge> : null}
           {entry.reloadable ? <Badge variant="info">reloadable</Badge> : null}
+          {entry.browser ? <Badge variant="info">browser</Badge> : null}
         </span>
       ),
     },

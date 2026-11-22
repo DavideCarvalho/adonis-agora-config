@@ -7,11 +7,11 @@ export const DEFAULT_BROWSER_CHANNEL = 'config/browser';
 /** `browser` in `config/config.ts`: the keys a tenant may send to the browser. */
 export interface BrowserConfig {
   /**
-   * The keys the browser may read, exact (`site.banner`) or by prefix (`site.*`). Everything else
-   * stays on the server. A secret, a vault reference or a sealed entry never reaches the browser,
-   * even when a pattern matches it.
+   * Keys the browser may read in addition to the entries marked `browser` on the control plane,
+   * exact (`site.banner`) or by prefix (`site.*`). Everything else stays on the server. A secret, a
+   * vault reference or a sealed entry never reaches the browser, even when a pattern matches it.
    */
-  keys: string[];
+  keys?: string[];
   /**
    * Live updates over `@adonisjs/transmit`: when a listed key changes and the change applies
    * without a restart, broadcasts `{ version }` on the channel (default `config/browser`). The
@@ -41,19 +41,19 @@ export function isBrowserKey(patterns: readonly string[], key: string): boolean 
 }
 
 /**
- * The values the browser may read: the listed keys, as the app uses them (boot or live value,
- * local env overrides included), without any secret, vault or sealed entry.
+ * The values the browser may read: entries marked `browser` in the console (or with
+ * `--browser`), plus the keys `browser.keys` lists, as the app uses them (boot or live value,
+ * local env overrides included). Never a secret, vault or sealed entry.
  */
 export function browserValues(
   source: BrowserSource,
   patterns: readonly string[],
 ): Record<string, ConfigValue> {
-  if (patterns.length === 0) return {};
   const entries = source.entries();
   const out: Record<string, ConfigValue> = {};
   for (const [key, value] of Object.entries(source.values())) {
-    if (!isBrowserKey(patterns, key)) continue;
     const entry = entries[key];
+    if (entry?.browser !== true && !isBrowserKey(patterns, key)) continue;
     if (entry && (entry.masked || isHiddenEntry(entry))) continue;
     out[key] = value;
   }
@@ -61,11 +61,16 @@ export function browserValues(
 }
 
 /**
- * Whether a change moved a value the browser reads. Only keys applied now count: a key that
- * needs a restart keeps its old value in this process, so the browser would see nothing new.
+ * Whether a change moved what the browser reads: a listed key, or an entry marked `browser`
+ * before or after the change. Only keys applied now count: a key that needs a restart keeps its
+ * old value (and mark) in this process, so the browser would see nothing new.
  */
-export function changesBrowser(change: ConfigChangeSet, patterns: readonly string[]): boolean {
-  return change.reloadable.some((key) => isBrowserKey(patterns, key));
+export function changesBrowser(
+  change: ConfigChangeSet,
+  patterns: readonly string[],
+  wasBrowser: (key: string) => boolean = () => false,
+): boolean {
+  return change.reloadable.some((key) => isBrowserKey(patterns, key) || wasBrowser(key));
 }
 
 /** The channel `browser.realtime` broadcasts on, or undefined when realtime is off. */
@@ -77,12 +82,15 @@ export function browserChannel(config: BrowserConfig | undefined): string | unde
 
 /** Refuses a `browser` block that cannot work. */
 export function assertBrowserConfig(config: BrowserConfig): void {
-  if (!Array.isArray(config.keys) || config.keys.some((key) => typeof key !== 'string' || !key)) {
+  if (
+    config.keys !== undefined &&
+    (!Array.isArray(config.keys) || config.keys.some((key) => typeof key !== 'string' || !key))
+  ) {
     throw new Error(
       'config: browser.keys must be a list of keys (`site.banner`) or prefixes (`site.*`)',
     );
   }
-  if (config.keys.includes('*')) {
+  if (config.keys?.includes('*')) {
     throw new Error(
       'config: browser.keys cannot be `*`: list the keys the browser may read, so a new key stays on the server until someone adds it',
     );

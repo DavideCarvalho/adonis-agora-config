@@ -424,7 +424,7 @@ export function configConsoleCommandHandler(
     if (input.value === undefined && input.vault === undefined) {
       throw new CommandError('value or vault is required (a PUT is an upsert, not an unset)', 400);
     }
-    for (const flag of ['secret', 'sealedTo', 'reloadable'] as const) {
+    for (const flag of ['secret', 'sealedTo', 'reloadable', 'browser'] as const) {
       if (body[flag] === undefined) continue;
       if (typeof body[flag] !== 'boolean') throw new CommandError(`${flag} must be a boolean`, 400);
       input[flag] = body[flag] as boolean;
@@ -580,6 +580,7 @@ export class FederatedConfigApp {
           ...(input.secret !== undefined ? { secret: input.secret } : {}),
           ...(typeof input.sealedTo === 'boolean' ? { sealedTo: input.sealedTo } : {}),
           ...(input.reloadable !== undefined ? { reloadable: input.reloadable } : {}),
+          ...(input.browser !== undefined ? { browser: input.browser } : {}),
           ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.message !== undefined ? { message: input.message } : {}),
         },
