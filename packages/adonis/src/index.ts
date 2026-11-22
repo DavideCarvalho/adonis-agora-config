@@ -79,6 +79,7 @@ export {
 } from './dashboard/console_authorize.js';
 export {
   type ConfigConsoleConfig,
+  type ConsoleActorHook,
   consolePath,
   type ResolvedConsoleConfig,
   resolveConsoleConfig,

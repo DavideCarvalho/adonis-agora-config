@@ -1,6 +1,7 @@
 import type { HttpContext } from '@adonisjs/core/http';
 import type { FederatedConfigAppConfig } from '../federation/console.js';
 import type { AccessDeniedOption } from './access_denied_page.js';
+import type { ConsoleActor } from './actor.js';
 import type { ConsoleAuthorize } from './console_authorize.js';
 import type { SignOutOption, ViewerHook } from './console_shell.js';
 
@@ -17,6 +18,14 @@ export interface ConfigConsoleConfig {
   authorize?: ConsoleAuthorize;
   /** Who is signed in, for the sidebar footer. Default: a structural read of `ctx.auth`/`ctx.authkit`. */
   viewer?: ViewerHook;
+  /**
+   * Who the audit trail records for a change or a reveal made in the console. Default: the authkit
+   * identity (`ctx.authkit`), else `ctx.auth.user`, else `console`. Set it when people sign in some
+   * other way, such as the authkit console session on a Hub:
+   * `actor: (ctx) => ({ id: realAccountId(ctx) })`. An answer without an `id` falls back to the
+   * default.
+   */
+  actor?: ConsoleActorHook;
   /** How the footer signs out (a path, `{ action }`, `{ href }`, or `false`). */
   signOut?: SignOutOption;
   /** The refusal page, when `authorize` says no. */
@@ -46,6 +55,16 @@ export interface ConfigConsoleConfig {
   appLabel?: string;
 }
 
+/** The `actor` option: who is acting in this request. */
+export type ConsoleActorHook = (
+  ctx: HttpContext,
+) =>
+  | Partial<ConsoleActor>
+  | string
+  | null
+  | undefined
+  | Promise<Partial<ConsoleActor> | string | null | undefined>;
+
 export interface ResolvedConsoleConfig {
   enabled: boolean;
   path: string;
@@ -54,6 +73,7 @@ export interface ResolvedConsoleConfig {
   revealSecrets: boolean;
   authorize?: ConsoleAuthorize;
   viewer?: ViewerHook;
+  actor?: ConsoleActorHook;
   signOut?: SignOutOption;
   accessDenied?: AccessDeniedOption<HttpContext>;
   loginHref?: string;
@@ -89,6 +109,7 @@ export function resolveConsoleConfig(
     revealSecrets: provided.revealSecrets ?? true,
     ...(provided.authorize ? { authorize: provided.authorize } : {}),
     ...(provided.viewer ? { viewer: provided.viewer } : {}),
+    ...(provided.actor ? { actor: provided.actor } : {}),
     ...(provided.signOut !== undefined ? { signOut: provided.signOut } : {}),
     ...(provided.accessDenied ? { accessDenied: provided.accessDenied } : {}),
     ...(provided.loginHref ? { loginHref: provided.loginHref } : {}),

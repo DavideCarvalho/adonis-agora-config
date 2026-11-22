@@ -243,6 +243,38 @@ describe('config console API', () => {
     expect(await unset.json()).toMatchObject({ changed: true });
   });
 
+  it('records the actor hook answer in the audit trail, else the default', async () => {
+    const { base, auth, admin } = await start({
+      entries: [{ key: 'p', value: 'hunter2', secret: true }],
+      console: {
+        actor: (ctx) => {
+          const who = ctx.request.header('x-account');
+          if (who === 'boom') throw new Error('session store down');
+          return who ? { id: who, email: `${who}@hub.test` } : { id: null as never };
+        },
+      },
+    });
+    const put = (headers: Record<string, string>, value: number) =>
+      fetch(`${base}/api/entries/checkout.timeoutMs?app=shop`, {
+        method: 'PUT',
+        headers: { ...auth, ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ value }),
+      });
+    expect((await put({ 'x-account': 'acc_1' }, 1)).status).toBe(200);
+    expect((await put({}, 2)).status).toBe(200);
+    expect((await put({ 'x-account': 'boom' }, 3)).status).toBe(200);
+    await fetch(`${base}/api/entries/p/reveal?app=shop`, {
+      method: 'POST',
+      headers: { ...auth, 'x-account': 'acc_2' },
+    });
+
+    const sets = await admin.audit(testScope, { page: 1, size: 10, action: 'set' });
+    // Newest first: the hook failed, said nobody, then named acc_1 (the seed is the last row).
+    expect(sets.data.slice(0, 3).map((row) => row.actor)).toEqual(['console', 'console', 'acc_1']);
+    const reveals = await admin.audit(testScope, { page: 1, size: 10, action: 'reveal' });
+    expect(reveals.data[0]?.actor).toBe('acc_2');
+  });
+
   it('does not reveal a secret when the console disables it', async () => {
     const { base, auth } = await start({
       revealSecrets: false,
