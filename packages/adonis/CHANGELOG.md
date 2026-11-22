@@ -1,5 +1,20 @@
 # @adonis-agora/config
 
+## 1.0.0-rc.2
+
+### Minor Changes
+
+- [#36](https://github.com/DavideCarvalho/adonis-agora-config/pull/36) [`f19d3d1`](https://github.com/DavideCarvalho/adonis-agora-config/commit/f19d3d1c41b2c533627495a7c235d38988b0bf85) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Values in the browser. An entry can be marked `browser` (console checkbox, off by default; `config:entry:set --browser`; the MCP tools), and a tenant can also list keys under `browser.keys` (exact or `prefix.*`). `config.browser()` returns the marked and listed values, never a secret, vault reference or sealed entry: the store refuses to mark one, and refuses to make a marked entry secret. The mark is part of the entry (`ConfigEntryState.browser`, present only when true, so existing fingerprints do not change).
+  
+  With `browser.realtime`, a hot-reloaded change to what the browser reads (including marking or unmarking) broadcasts `{ version }` over `@adonisjs/transmit` (channel `config/browser`); `browser.route` adds a GET route answering `{ version, values }`.
+  
+  `@adonis-agora/config-client/react` adds `ConfigProvider`, `useConfig`, `useConfigValues`, `useConfigRealtime` and `RemoteConfigProvider` (reads the route); `@adonis-agora/config-client/react/inertia` adds `InertiaConfigProvider`, which follows the shared `config` prop and reloads it on a change. React and Inertia are optional peers.
+
+### Patch Changes
+
+- Updated dependencies [[`f19d3d1`](https://github.com/DavideCarvalho/adonis-agora-config/commit/f19d3d1c41b2c533627495a7c235d38988b0bf85)]:
+  - @adonis-agora/config-core@1.0.0-rc.2
+
 ## 1.0.0-rc.1
 
 ### Minor Changes

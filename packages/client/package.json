@@ -1,6 +1,6 @@
 {
   "name": "@adonis-agora/config-client",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0-rc.1",
   "description": "Remote-safe client for an @adonis-agora/config server \u2014 fetch a scope with a shared secret or authkit client credentials, from any runtime \u2014 and React/Inertia bindings for the keys an app lets the browser read. Part of the Agora ecosystem.",
   "license": "MIT",
   "repository": {
