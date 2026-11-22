@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ApplicationService } from '@adonisjs/core/types';
 import { ConfigAdmin } from '../src/admin.js';
+import { browserChannel, browserValues, changesBrowser } from '../src/browser.js';
 import {
   type CryptoOptions,
   createConfigKeyring,
@@ -234,6 +235,7 @@ export default class ConfigProvider {
       localEnv: status.localEnv,
       get: (k, fallback) => client.get(k, fallback),
       all: () => client.values(),
+      browser: () => browserValues(client, config.browser?.keys ?? []),
       status: () => client.status(),
     };
     this.#runtime = runtime;
@@ -352,6 +354,7 @@ export default class ConfigProvider {
       localEnv: false,
       get: (_key, fallback) => fallback,
       all: () => ({}),
+      browser: () => ({}),
       status: () => undefined,
     };
     this.#runtime = runtime;
@@ -603,6 +606,49 @@ export default class ConfigProvider {
       const router = await this.app.container.make('router');
       runtime.controlPlane.register(router as never);
     });
+    if (runtime.topology === 'tenant') await this.#browser(runtime, logger);
+  }
+
+  /**
+   * `browser` in config/config.ts: the optional GET route, and the transmit broadcast when a key the
+   * browser reads changes. Neither runs in ace: a command serves no page.
+   */
+  async #browser(runtime: ConfigRuntime, logger: { warn(message: string): void }): Promise<void> {
+    const config = this.app.config.get<ConfigConfig | undefined>('config');
+    const browser = config?.topology === 'tenant' ? config.browser : undefined;
+    const client = runtime.client;
+    if (!browser || !client || this.#isConsole()) return;
+    if (browser.route) {
+      const route = browser.route;
+      await this.app.booted(async () => {
+        const router = (await this.app.container.make('router')) as unknown as {
+          get(path: string, handler: (ctx: HttpContext) => unknown): { as(name: string): unknown };
+        };
+        router
+          .get(route, (ctx: HttpContext) => {
+            ctx.response.header('cache-control', 'no-store');
+            return { version: client.status().version, values: runtime.browser() };
+          })
+          .as('agora_config.browser');
+      });
+    }
+    const channel = browserChannel(browser);
+    if (!channel) return;
+    try {
+      const transmit = (
+        (await import('@adonisjs/transmit/services/main' as string)) as {
+          default: { broadcast(channel: string, payload: Record<string, unknown>): void };
+        }
+      ).default;
+      const keys = browser.keys;
+      client.onChange((change) => {
+        if (changesBrowser(change, keys)) transmit.broadcast(channel, { version: change.version });
+      });
+    } catch {
+      logger.warn(
+        '[@adonis-agora/config] browser.realtime is on but @adonisjs/transmit is not installed/configured',
+      );
+    }
   }
 
   /**

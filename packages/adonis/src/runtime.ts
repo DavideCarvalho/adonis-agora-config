@@ -26,6 +26,8 @@ export interface ConfigRuntime {
   get(key: string, fallback?: ConfigValue): ConfigValue | undefined;
   /** Every value the app may use. */
   all(): Record<string, ConfigValue>;
+  /** The values the browser may read (`browser.keys`); empty when none are listed. */
+  browser(): Record<string, ConfigValue>;
   /** What the tenant loaded: source, version, staleness. Undefined on a server. */
   status(): TenantStatus | undefined;
 }

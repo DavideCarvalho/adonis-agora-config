@@ -32,3 +32,10 @@ client.status()
 next request fetches a fresh token. This package has no OAuth or authkit logic of its own.
 
 Part of the Agora ecosystem.
+
+## React
+
+`@adonis-agora/config-client/react` reads the keys an app lets the browser see (`browser.keys` in
+`config/config.ts`): `useConfig('site.banner')`, `InertiaConfigProvider` (from
+`/react/inertia`) and `RemoteConfigProvider`, with live updates over transmit. See
+https://davidecarvalho.github.io/agora/docs/config/browser
