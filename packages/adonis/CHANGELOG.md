@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 1.0.0-rc.3
+
+### Patch Changes
+
+- [#38](https://github.com/DavideCarvalho/adonis-agora-config/pull/38) [`7b983b4`](https://github.com/DavideCarvalho/adonis-agora-config/commit/7b983b4ad144ab37472412b52006131466f1a4b3) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `browser.realtime` now broadcasts. The provider read `@adonisjs/transmit/services/main` before the app booted, when that module's export is still `undefined`, so every change was dropped silently. It now reads the `transmit` binding from the container once the app has booted, and logs a warning when a broadcast fails.
+
 ## 1.0.0-rc.2
 
 ### Minor Changes
