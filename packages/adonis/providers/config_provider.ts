@@ -79,6 +79,10 @@ function spaDirectory(): string {
   return fileURLToPath(new URL('../assets/spa/', import.meta.url));
 }
 
+interface TransmitLike {
+  broadcast(channel: string, payload: Record<string, unknown>): void;
+}
+
 /**
  * Builds the config runtime from `config/config.ts` and publishes it as `'agora.config'` and as
  * `services/main`.
@@ -634,28 +638,37 @@ export default class ConfigProvider {
     }
     const channel = browserChannel(browser);
     if (!channel) return;
-    try {
-      const transmit = (
-        (await import('@adonisjs/transmit/services/main' as string)) as {
-          default: { broadcast(channel: string, payload: Record<string, unknown>): void };
-        }
-      ).default;
-      const keys = browser.keys ?? [];
-      // What the browser read before this change: unmarking a key must reach open pages too.
-      let before = new Set(Object.keys(runtime.browser()));
-      client.onChange((change) => {
-        const now = new Set(Object.keys(runtime.browser()));
-        const was = before;
-        before = now;
-        if (changesBrowser(change, keys, (key) => was.has(key) || now.has(key))) {
-          transmit.broadcast(channel, { version: change.version });
-        }
-      });
-    } catch {
-      logger.warn(
-        '[@adonis-agora/config] browser.realtime is on but @adonisjs/transmit is not installed/configured',
-      );
-    }
+    // The `transmit` binding, read once the app has booted. Not `@adonisjs/transmit/services/main`:
+    // that module fills its default export only after boot, so importing it here (before boot)
+    // would keep `undefined` and every broadcast would be lost.
+    let transmit: TransmitLike | undefined;
+    await this.app.booted(async () => {
+      try {
+        transmit = (await this.app.container.make('transmit' as never)) as TransmitLike;
+        if (typeof transmit?.broadcast !== 'function') throw new Error('no broadcast');
+      } catch {
+        transmit = undefined;
+        logger.warn(
+          '[@adonis-agora/config] browser.realtime is on but @adonisjs/transmit is not installed/configured',
+        );
+      }
+    });
+    const keys = browser.keys ?? [];
+    // What the browser read before this change: unmarking a key must reach open pages too.
+    let before = new Set(Object.keys(runtime.browser()));
+    client.onChange((change) => {
+      const now = new Set(Object.keys(runtime.browser()));
+      const was = before;
+      before = now;
+      if (!transmit || !changesBrowser(change, keys, (key) => was.has(key) || now.has(key))) return;
+      try {
+        transmit.broadcast(channel, { version: change.version });
+      } catch (error) {
+        logger.warn(
+          `[@adonis-agora/config] browser.realtime broadcast failed: ${(error as Error).message}`,
+        );
+      }
+    });
   }
 
   /**

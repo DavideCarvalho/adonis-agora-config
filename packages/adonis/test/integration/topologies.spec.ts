@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IgnitorFactory } from '@adonisjs/core/factories';
 import type { ApplicationService } from '@adonisjs/core/types';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigAdmin } from '../../src/admin.js';
 import {
   type ConfigConfig,
@@ -17,12 +17,21 @@ import { sharedSecretVerifier } from '../../src/topology/verify.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
 
 const broadcasts: Array<{ channel: string; payload: Record<string, unknown> }> = [];
-vi.mock('@adonisjs/transmit/services/main', () => ({
-  default: {
-    broadcast: (channel: string, payload: Record<string, unknown>) =>
-      broadcasts.push({ channel, payload }),
-  },
-}));
+
+/**
+ * Stands in for `@adonisjs/transmit`'s provider: it binds `transmit` in the container, and
+ * `@adonisjs/transmit/services/main` is only filled after boot, so the config provider must read
+ * the binding, never that module at boot.
+ */
+class FakeTransmitProvider {
+  constructor(protected app: ApplicationService) {}
+  register() {
+    this.app.container.singleton('transmit' as never, () => ({
+      broadcast: (channel: string, payload: Record<string, unknown>) =>
+        broadcasts.push({ channel, payload }),
+    }));
+  }
+}
 
 interface Route {
   method: string;
@@ -60,13 +69,19 @@ function root(): URL {
 }
 
 /** A real AdonisJS app: the core providers plus the config provider, no shortcuts. */
-async function boot(config: ConfigConfig): Promise<ApplicationService> {
+async function boot(
+  config: ConfigConfig,
+  options: { transmit?: boolean } = {},
+): Promise<ApplicationService> {
   const ignitor = new IgnitorFactory()
     .withCoreProviders()
     .withCoreConfig()
     .merge({
       rcFileContents: {
-        providers: [() => import('../../providers/config_provider.js')],
+        providers: [
+          () => import('../../providers/config_provider.js'),
+          ...(options.transmit ? [async () => ({ default: FakeTransmitProvider as never })] : []),
+        ],
       },
       config: { config },
     })
@@ -288,6 +303,7 @@ describe('real Adonis apps: standalone and control plane', () => {
         },
         browser: { keys: ['site.*'], realtime: true, route: '/_config/browser' },
       }) as TenantTopologyConfig,
+      { transmit: true },
     );
     const tenant = (await runtimeOf(tenantApp)) as Awaited<ReturnType<typeof runtimeOf>> & {
       browser(): Record<string, unknown>;
