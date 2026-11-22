@@ -1,7 +1,7 @@
 {
   "name": "@adonis-agora/config-client",
   "version": "1.0.0-rc.0",
-  "description": "Remote-safe client for an @adonis-agora/config server — fetch a scope with a shared secret or authkit client credentials, from any runtime. Part of the Agora ecosystem.",
+  "description": "Remote-safe client for an @adonis-agora/config server \u2014 fetch a scope with a shared secret or authkit client credentials, from any runtime \u2014 and React/Inertia bindings for the keys an app lets the browser read. Part of the Agora ecosystem.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,6 +17,8 @@
     "adonis",
     "config",
     "config-client",
+    "react",
+    "inertia",
     "agora"
   ],
   "author": "Davi Carvalho <davi@goflip.ai>",
@@ -28,6 +30,16 @@
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js",
       "default": "./dist/src/index.js"
+    },
+    "./react": {
+      "types": "./dist/src/react/index.d.ts",
+      "import": "./dist/src/react/index.js",
+      "default": "./dist/src/react/index.js"
+    },
+    "./react/inertia": {
+      "types": "./dist/src/react/inertia.d.ts",
+      "import": "./dist/src/react/inertia.js",
+      "default": "./dist/src/react/inertia.js"
     }
   },
   "files": [
@@ -46,16 +58,31 @@
     "@adonis-agora/config-core": "workspace:^"
   },
   "peerDependencies": {
-    "@adonis-agora/authkit-client": ">=1.0.0-rc.7 <2.0.0"
+    "@adonis-agora/authkit-client": ">=1.0.0-rc.7 <2.0.0",
+    "react": "^19.0.0",
+    "@inertiajs/react": ">=2.0.0"
   },
   "peerDependenciesMeta": {
     "@adonis-agora/authkit-client": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "@inertiajs/react": {
       "optional": true
     }
   },
   "devDependencies": {
     "@adonis-agora/authkit-client": "1.0.0-rc.7",
+    "@inertiajs/react": "3.7.0",
+    "@testing-library/react": "16.3.3",
     "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "31.0.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   },

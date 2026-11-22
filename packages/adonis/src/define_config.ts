@@ -1,5 +1,6 @@
 import type { ConfigValue, VaultReference } from '@adonis-agora/config-core';
 import type { ApplicationService } from '@adonisjs/core/types';
+import { assertBrowserConfig, type BrowserConfig } from './browser.js';
 import type { CryptoOptions, SecretCodec } from './crypto/secrets.js';
 import type { ConfigConsoleConfig } from './dashboard/define_config.js';
 import type { SqlDatabase } from './sql.js';
@@ -99,6 +100,8 @@ export interface StandaloneConfig extends BaseConfig {
    * ```
    */
   consoleCommands?: ConfigConsoleCommandsConfig;
+  /** Tenant only: a standalone app or a control plane serves no values to its own pages. */
+  browser?: never;
 }
 
 /** The server every app connects to. */
@@ -144,6 +147,8 @@ export interface ControlPlaneConfig extends BaseConfig {
    * http tenants always use it.
    */
   transport?: ConfigTransportFactory;
+  /** Tenant only: a standalone app or a control plane serves no values to its own pages. */
+  browser?: never;
 }
 
 /** {@link StandaloneConfig.consoleCommands}. */
@@ -234,6 +239,18 @@ export interface TenantTopologyConfig extends BaseConfig {
      */
     transport?: ConfigTransportFactory;
   };
+  /**
+   * What this app's pages may read (`config.browser()`, `@adonis-agora/config-client/react`): the
+   * entries marked `browser` on the control plane plus `keys`, and whether a change reaches open
+   * pages live:
+   *
+   * ```ts
+   * browser: { keys: ['site.banner', 'support.*'], realtime: true },
+   * ```
+   *
+   * Secrets, vault references and sealed entries never reach the browser.
+   */
+  browser?: BrowserConfig;
   /** FORBIDDEN on a tenant: it owns no configuration; it reads the control plane's. */
   store?: never;
   crypto?: never;
@@ -293,6 +310,15 @@ export function defineConfig(config: ConfigConfig): ConfigConfig {
         'config: `verifyTenant` must be a function, an object with verify() (a class instance), or a lazy import of one',
       );
     }
+  }
+  const browser = (config as { browser?: BrowserConfig }).browser;
+  if (browser !== undefined) {
+    if (config.topology !== 'tenant') {
+      throw new Error(
+        'config: `browser` only applies to topology "tenant" (the app that reads its configuration)',
+      );
+    }
+    assertBrowserConfig(browser);
   }
   if (config.topology !== 'control-plane' && raw.verifyTenant !== undefined) {
     throw new Error('config: `verifyTenant` only applies to topology "control-plane"');

@@ -25,9 +25,9 @@ node ace config:tenant:key --rotate
 
 | Command | |
 | --- | --- |
-| `config:entry:list` | entries, with `--search`, `--secret`, `--reloadable`, `--page`, `--size` |
+| `config:entry:list` | entries, with `--search`, `--secret`, `--reloadable`, `--browser`, `--page`, `--size` |
 | `config:entry:get <key>` | one entry; `--secrets` reveals a secret (audited) |
-| `config:entry:set <key> <value>` | JSON or text; `--vault`, `--secret`, `--sealed` (control plane cannot read it), `--reloadable`, `--description`, `--message`, `--string` |
+| `config:entry:set <key> <value>` | JSON or text; `--vault`, `--secret`, `--sealed` (control plane cannot read it), `--reloadable`, `--browser` (the app's pages may read it), `--description`, `--message`, `--string` |
 | `config:entry:unset <key>` | removes it; asks unless `--force` |
 | `config:history` | versions, newest first (`--oldest`, `--page`, `--size`) |
 | `config:version:show <version>` | one version exactly as it was (`--secrets`) |

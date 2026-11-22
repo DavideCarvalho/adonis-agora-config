@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IgnitorFactory } from '@adonisjs/core/factories';
 import type { ApplicationService } from '@adonisjs/core/types';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfigAdmin } from '../../src/admin.js';
 import {
   type ConfigConfig,
@@ -15,6 +15,14 @@ import {
 import { resetKnownTenants } from '../../src/http/control_plane.js';
 import { sharedSecretVerifier } from '../../src/topology/verify.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
+
+const broadcasts: Array<{ channel: string; payload: Record<string, unknown> }> = [];
+vi.mock('@adonisjs/transmit/services/main', () => ({
+  default: {
+    broadcast: (channel: string, payload: Record<string, unknown>) =>
+      broadcasts.push({ channel, payload }),
+  },
+}));
 
 interface Route {
   method: string;
@@ -229,5 +237,92 @@ describe('real Adonis apps: standalone and control plane', () => {
     await admin.setEntry(scope, 'db.host', { value: 'db-2' }, { actor: 'integration' });
     await waitFor('the reloadable value', () => tenant.get('feature.flag') === 'on');
     expect(tenant.get('db.host')).toBe('db-1');
+  });
+
+  it('serves the browser keys of a real tenant app, and broadcasts their live changes', {
+    timeout: 30_000,
+  }, async () => {
+    broadcasts.length = 0;
+    const controlApp = await boot(
+      defineConfig({
+        topology: 'control-plane',
+        environment: 'production',
+        verifyTenant: sharedSecretVerifier({
+          partitions: {
+            shop: { secret: 'shop-secret', capabilities: ['config:read', 'config:secrets:read'] },
+          },
+        }),
+        store: stores.memory(),
+        crypto: { keys: ['a-real-app-key-of-32-characters!!'] },
+        console: false,
+      }) as ConfigConfig,
+    );
+    const controlRuntime = await runtimeOf(controlApp);
+    const controlPlane = controlRuntime.controlPlane as never;
+    const base = await serveControlPlane(controlPlane);
+    const scope = { app: 'shop', environment: 'production', label: 'main' };
+    const admin = new ConfigAdmin({
+      store: controlRuntime.store as never,
+      onChange: (changed, version) =>
+        (controlPlane as { bus: { publish(scope: never, version: number): void } }).bus.publish(
+          changed as never,
+          version,
+        ),
+    });
+    const actor = { actor: 'integration' };
+    await admin.setEntry(scope, 'site.banner', { value: 'old', reloadable: true }, actor);
+    await admin.setEntry(scope, 'site.token', { value: 'sk_live', secret: true }, actor);
+    await admin.setEntry(scope, 'db.host', { value: 'db-1', reloadable: true }, actor);
+
+    const tenantApp = await boot(
+      defineConfig({
+        topology: 'tenant',
+        tenant: {
+          url: base,
+          partition: 'shop',
+          token: 'shop-secret',
+          environment: 'production',
+          stream: true,
+          intervalMs: 60_000,
+          keyPath: false,
+        },
+        browser: { keys: ['site.*'], realtime: true, route: '/_config/browser' },
+      }) as TenantTopologyConfig,
+    );
+    const tenant = (await runtimeOf(tenantApp)) as Awaited<ReturnType<typeof runtimeOf>> & {
+      browser(): Record<string, unknown>;
+    };
+    await waitFor('the tenant fetch', () => tenant.get('site.banner') === 'old');
+    await waitFor('the SSE stream', () => tenant.client?.status().streaming === true, 5000);
+    expect(tenant.get('site.token')).toBe('sk_live');
+    expect(tenant.browser()).toEqual({ 'site.banner': 'old' });
+
+    const router = (await tenantApp.container.make('router')) as unknown as {
+      commit(): void;
+      match(url: string, method: string): { route: { handler: unknown } } | null;
+    };
+    router.commit();
+    const matched = router.match('/_config/browser', 'GET');
+    expect(matched).not.toBeNull();
+    const headers: Record<string, string> = {};
+    const handler =
+      (matched!.route.handler as { handle?: unknown }).handle ?? matched!.route.handler;
+    const body = await (handler as (ctx: unknown) => unknown)({
+      response: { header: (name: string, value: string) => (headers[name] = value) },
+    });
+    expect(body).toMatchObject({ values: { 'site.banner': 'old' } });
+    expect(headers['cache-control']).toBe('no-store');
+
+    // A key the browser does not read changes: no broadcast.
+    await admin.setEntry(scope, 'db.host', { value: 'db-2' }, actor);
+    await waitFor('the db change', () => tenant.get('db.host') === 'db-2');
+    expect(broadcasts).toEqual([]);
+
+    await admin.setEntry(scope, 'site.banner', { value: 'new' }, actor);
+    await waitFor('the browser broadcast', () => broadcasts.length > 0);
+    expect(broadcasts).toEqual([
+      { channel: 'config/browser', payload: { version: expect.any(Number) } },
+    ]);
+    expect(tenant.browser()).toEqual({ 'site.banner': 'new' });
   });
 });

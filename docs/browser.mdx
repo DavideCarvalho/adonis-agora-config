@@ -1,0 +1,149 @@
+---
+title: Values in the browser
+description: Let pages read a few keys, and update open pages when they change.
+icon: Monitor
+---
+
+An app's configuration stays on the server. To show a value on a page — a banner, a support email,
+a limit the UI displays — mark the entry **browser**, or list its key in the app. Nothing else
+reaches the browser, and a secret never does.
+
+## Marking an entry
+
+In the console, check **browser** when creating or editing the entry. It is off by default, and it
+cannot be checked on a secret, a sealed value or a vault reference. From the command line:
+
+```sh
+node ace config:entry:set site.banner "Manutenção às 22h" --app=shop --browser --reloadable
+```
+
+The mark travels with the entry to the app, like `reloadable`.
+
+## Listing keys in the app
+
+```ts title="config/config.ts"
+export default defineConfig({
+  topology: 'tenant',
+  tenant: { /* … */ },
+  browser: {
+    keys: ['site.banner', 'support.*'],
+    realtime: true,
+  },
+})
+```
+
+The listed keys reach the browser in addition to the marked entries. A secret never does, even when a
+pattern matches it.
+
+| Option | Default | |
+| --- | --- | --- |
+| `keys` | none | exact keys (`site.banner`) or prefixes (`support.*`); `*` alone is refused |
+| `realtime` | off | `true` or `{ channel }`: tell open pages when a listed key changes (needs `@adonisjs/transmit`) |
+| `route` | off | a GET route answering `{ version, values }`, for pages without Inertia props |
+
+`browser` applies to a tenant: the app that reads its configuration from a control plane.
+
+## Reading the values on the server
+
+```ts
+import config from '@adonis-agora/config/services/main'
+
+config.browser()
+// { 'site.banner': 'Manutenção às 22h', 'support.email': 'ajuda@example.com' }
+```
+
+Share them with every Inertia page:
+
+```ts title="config/inertia.ts"
+import config from '@adonis-agora/config/services/main'
+
+export default defineConfig({
+  sharedData: {
+    config: () => config.browser(),
+  },
+})
+```
+
+## Reading them in React
+
+```tsx title="inertia/app.tsx"
+import { InertiaConfigProvider } from '@adonis-agora/config-client/react/inertia'
+import { Transmit } from '@adonisjs/transmit-client'
+
+const transmit = new Transmit({ baseUrl: window.location.origin })
+
+createInertiaApp({
+  setup({ el, App, props }) {
+    createRoot(el).render(
+      <InertiaConfigProvider initialPage={props.initialPage} realtime={{ transmit }}>
+        <App {...props} />
+      </InertiaConfigProvider>,
+    )
+  },
+})
+```
+
+```tsx
+import { useConfig } from '@adonis-agora/config-client/react'
+
+export function Banner() {
+  const banner = useConfig<string>('site.banner')
+  return banner ? <div role="status">{banner}</div> : null
+}
+```
+
+`useConfig(key, fallback)` returns the fallback for a key the server did not send. `useConfigValues()`
+returns them all.
+
+| `InertiaConfigProvider` prop | Default | |
+| --- | --- | --- |
+| `initialPage` | — | `props.initialPage` from `setup` |
+| `prop` | `config` | the shared prop holding `config.browser()` |
+| `realtime` | off | `{ transmit, channel? }`: reload the prop when a listed key changes |
+
+## Live updates
+
+With `realtime: true`, a change to a key the browser reads (marked or listed, including marking or
+unmarking it) broadcasts `{ version }` on the channel `config/browser`. Open pages reload the values; the message itself carries none.
+
+Only a change the app applies at once reaches the browser: mark the key **reloadable** on the
+control plane, or match it with `tenant.reloadable`. A boot-time key keeps its value until the app
+restarts, so open pages see the new value after the next deploy.
+
+```ts title="config/config.ts"
+tenant: {
+  reloadable: ['site.*', 'support.*'],
+},
+browser: { realtime: true },
+```
+
+A transmit channel without `transmit.authorize(...)` is open to any visitor, which suits this one: the
+message carries a version number and nothing else. To limit it to signed-in users:
+
+```ts title="start/transmit.ts"
+import transmit from '@adonisjs/transmit/services/main'
+
+transmit.authorize('config/browser', (ctx) => Boolean(ctx.auth.user))
+```
+
+## Without Inertia
+
+Turn the route on and read it from any React tree:
+
+```ts title="config/config.ts"
+browser: { keys: ['site.banner'], realtime: true, route: '/_config/browser' },
+```
+
+```tsx
+import { RemoteConfigProvider, useConfig } from '@adonis-agora/config-client/react'
+
+<RemoteConfigProvider url="/_config/browser" realtime={{ transmit }}>
+  <Banner />
+</RemoteConfigProvider>
+```
+
+The provider loads the route once, and again on every change. A failed request keeps the values the
+page already has. Pass `initialValues` to render server-side values before the first response.
+
+Outside React, subscribe with `@adonisjs/transmit-client` and fetch the route when a message
+arrives.

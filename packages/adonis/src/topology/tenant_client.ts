@@ -661,7 +661,8 @@ export class TenantClient {
         (before?.masked ?? false) !== (after?.masked ?? false) ||
         before?.vault !== after?.vault ||
         before?.sealedTo?.kid !== after?.sealedTo?.kid ||
-        before?.reloadable !== after?.reloadable;
+        before?.reloadable !== after?.reloadable ||
+        (before?.browser === true) !== (after?.browser === true);
       if (changed) changes.push(key);
     }
     const reloadable: string[] = [];

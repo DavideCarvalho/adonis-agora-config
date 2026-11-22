@@ -518,12 +518,13 @@ export class ConfigConsole {
     const list = parseListQuery(ctx.request.qs() as Record<string, unknown>, {
       sortable: ['key', 'updatedAt', 'updatedBy'],
       defaultSort: { field: 'key', direction: 'asc' },
-      filterable: ['key', 'secret', 'reloadable', 'updatedBy'],
+      filterable: ['key', 'secret', 'reloadable', 'browser', 'updatedBy'],
       defaultSize: 50,
       maxSize: 200,
     });
     const secret = booleanFilter(list.filters.secret);
     const reloadable = booleanFilter(list.filters.reloadable);
+    const browser = booleanFilter(list.filters.browser);
     const updatedBy = list.filters.updatedBy;
     return ctx.response.json(
       await admin.listEntries(scope, await this.#canReadSecrets(), {
@@ -533,6 +534,7 @@ export class ConfigConsole {
           ...(list.search !== undefined ? { search: list.search } : {}),
           ...(secret !== undefined ? { secret } : {}),
           ...(reloadable !== undefined ? { reloadable } : {}),
+          ...(browser !== undefined ? { browser } : {}),
           ...(typeof updatedBy === 'string' ? { updatedBy } : {}),
         },
         sort: list.sort as { field: 'key' | 'updatedAt' | 'updatedBy'; direction: 'asc' | 'desc' },
@@ -582,6 +584,10 @@ export class ConfigConsole {
         throw new HttpError(400, 'reloadable must be a boolean');
       }
       input.reloadable = body.reloadable;
+    }
+    if (body.browser !== undefined) {
+      if (typeof body.browser !== 'boolean') throw new HttpError(400, 'browser must be a boolean');
+      input.browser = body.browser;
     }
     if (body.description !== undefined) {
       if (body.description !== null && typeof body.description !== 'string') {

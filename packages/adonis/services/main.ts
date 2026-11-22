@@ -41,6 +41,14 @@ const config = {
     return hasRuntime() ? getRuntime().all() : {};
   },
 
+  /**
+   * The values this app's pages may read: the keys listed in `browser.keys`, never a secret. Share
+   * them with Inertia (`sharedData: { config: () => config.browser() }`) or Edge.
+   */
+  browser(): Record<string, ConfigValue> {
+    return hasRuntime() ? getRuntime().browser() : {};
+  },
+
   /** The same values as nested JSON (`db.port` → `{ db: { port } }`). */
   nested(): Record<string, ConfigValue> {
     return getRuntime().client?.nested() ?? {};

@@ -35,6 +35,8 @@ export interface EntryFilters {
   search?: string;
   secret?: boolean;
   reloadable?: boolean;
+  /** Only entries the tenant's pages may read. */
+  browser?: boolean;
   updatedBy?: string;
 }
 
@@ -164,6 +166,7 @@ export class ConfigAdmin {
           ...(entry.sealedTo !== undefined ? { sealedTo: entry.sealedTo } : {}),
           secret: entry.secret,
           reloadable: entry.reloadable,
+          ...(entry.browser === true ? { browser: true } : {}),
           ...(entry.description !== undefined ? { description: entry.description } : {}),
           updatedAt: entry.updatedAt,
           updatedBy: entry.updatedBy,
@@ -198,6 +201,7 @@ export class ConfigAdmin {
             (entry.description ?? '').toLowerCase().includes(search)) &&
           (filters.secret === undefined || entry.secret === filters.secret) &&
           (filters.reloadable === undefined || entry.reloadable === filters.reloadable) &&
+          (filters.browser === undefined || (entry.browser === true) === filters.browser) &&
           (filters.updatedBy === undefined || entry.updatedBy === filters.updatedBy),
       )
       .sort((a, b) => {

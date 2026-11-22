@@ -11,6 +11,8 @@ export interface Entry {
   sealedTo?: { app: string; kid: string };
   secret: boolean;
   reloadable: boolean;
+  /** The app's pages may read it (`config.browser()`). Absent when not marked. */
+  browser?: boolean;
   description?: string;
   vault?: string;
   /** When the key was first set; `null` (or absent, on older servers) when unknown. */
@@ -126,6 +128,7 @@ export interface EntryInput {
   sealedTo?: boolean;
   secret?: boolean;
   reloadable?: boolean;
+  browser?: boolean;
   description?: string | null;
   message?: string;
 }

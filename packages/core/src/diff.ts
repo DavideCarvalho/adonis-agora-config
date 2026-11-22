@@ -13,6 +13,7 @@ function sameFlags(a: ConfigEntryView, b: ConfigEntryView): boolean {
   return (
     a.secret === b.secret &&
     a.reloadable === b.reloadable &&
+    (a.browser === true) === (b.browser === true) &&
     (a.description ?? '') === (b.description ?? '') &&
     (a.vault ?? '') === (b.vault ?? '')
   );

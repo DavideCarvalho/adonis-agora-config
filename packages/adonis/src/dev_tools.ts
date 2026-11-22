@@ -180,6 +180,7 @@ export function configDevTools(
           },
           secret: { type: 'boolean', description: 'Only secret entries.' },
           reloadable: { type: 'boolean', description: 'Only reloadable entries.' },
+          browser: { type: 'boolean', description: "Only entries the app's pages may read." },
           page: PAGE,
           limit: LIMIT,
         },
@@ -195,6 +196,7 @@ export function configDevTools(
             ...(str(input, 'search') !== undefined ? { search: str(input, 'search')! } : {}),
             ...(typeof input.secret === 'boolean' ? { secret: input.secret } : {}),
             ...(typeof input.reloadable === 'boolean' ? { reloadable: input.reloadable } : {}),
+            ...(typeof input.browser === 'boolean' ? { browser: input.browser } : {}),
           },
         });
         return {
@@ -372,6 +374,10 @@ export function configDevTools(
               "Seal the value to this app's X25519 public key: the server cannot read it, only the app can.",
           },
           reloadable: { type: 'boolean', description: 'Apply on a running tenant.' },
+          browser: {
+            type: 'boolean',
+            description: "Let the app's pages read it (config.browser()). Refused on a secret.",
+          },
           description: { type: 'string' },
           string: {
             type: 'boolean',
@@ -411,6 +417,7 @@ export function configDevTools(
             ...(input.sealed === true ? { sealedTo: true, secret: true } : {}),
             ...(typeof input.secret === 'boolean' ? { secret: input.secret } : {}),
             ...(typeof input.reloadable === 'boolean' ? { reloadable: input.reloadable } : {}),
+            ...(typeof input.browser === 'boolean' ? { browser: input.browser } : {}),
             ...(str(input, 'description') !== undefined
               ? { description: str(input, 'description')! }
               : {}),

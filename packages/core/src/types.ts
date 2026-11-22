@@ -35,6 +35,11 @@ export interface ConfigEntryState {
   secret: boolean;
   /** Reloadable entries are applied on a running tenant; the rest need a restart. */
   reloadable: boolean;
+  /**
+   * The tenant's pages may read it (`config.browser()`). Present only when `true`; never on a
+   * secret, vault or sealed entry.
+   */
+  browser?: boolean;
   description?: string;
   /**
    * ISO date of the write that first set this key; kept by every later write. Absent on entries
@@ -123,6 +128,8 @@ export interface ConfigEntryInput {
   sealedTo?: boolean | ConfigSealedTo;
   secret?: boolean;
   reloadable?: boolean;
+  /** Let the tenant's pages read it. Refused on a secret, vault or sealed entry. */
+  browser?: boolean;
   description?: string | null;
 }
 

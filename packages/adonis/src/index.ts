@@ -33,6 +33,12 @@ export {
 } from './admin.js';
 export { type BootstrapOptions, type BootstrapResult, bootstrapConfig } from './bootstrap.js';
 export {
+  type BrowserConfig,
+  browserValues,
+  DEFAULT_BROWSER_CHANNEL,
+  isBrowserKey,
+} from './browser.js';
+export {
   ConfigClient,
   type ConfigClientOptions,
   type ConfigClientStatus,
