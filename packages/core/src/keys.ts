@@ -2,6 +2,14 @@ import type { ConfigEntryState, ConfigValue } from './types.js';
 
 const KEY_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
+/** Segments that would reach `Object.prototype` when a key is turned into a nested object. */
+const RESERVED_SEGMENTS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Whether `segment` is one of `__proto__`, `constructor`, `prototype`. */
+export function isReservedKeySegment(segment: string): boolean {
+  return RESERVED_SEGMENTS.has(segment);
+}
+
 /** Throws unless `key` is a dot path of plain segments (`db.host`, `feature.new_ui`). */
 export function assertConfigKey(key: string): void {
   if (typeof key !== 'string' || key.length === 0) {
@@ -13,6 +21,9 @@ export function assertConfigKey(key: string): void {
       throw new Error(
         `config: invalid key "${key}" (segments are letters, digits, _ and -, separated by dots)`,
       );
+    }
+    if (isReservedKeySegment(segment)) {
+      throw new Error(`config: invalid key "${key}" ("${segment}" is a reserved segment)`);
     }
   }
 }
