@@ -1,5 +1,11 @@
 # @adonis-agora/config-core
 
+## 1.0.0-rc.3
+
+### Patch Changes
+
+- [#40](https://github.com/DavideCarvalho/adonis-agora-config/pull/40) [`bb6c0c0`](https://github.com/DavideCarvalho/adonis-agora-config/commit/bb6c0c008d7e72de9025fb25cfb4b88afdee52d8) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Security: `unflattenObject` and `assertConfigKey` reject `__proto__`, `constructor` and `prototype` key segments. Before, a key like `__proto__.x` written to the store polluted `Object.prototype` in every app that read the config.
+
 ## 1.0.0-rc.2
 
 ### Minor Changes
