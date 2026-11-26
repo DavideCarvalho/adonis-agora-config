@@ -1,6 +1,6 @@
 {
   "name": "@adonis-agora/config-dashboard",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0",
   "private": false,
   "description": "Console for @adonis-agora/config — entries per app/environment, version history, diffs, rollback and audit. A React SPA served by the control plane. Part of the Agora ecosystem.",
   "license": "MIT",
