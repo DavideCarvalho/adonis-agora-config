@@ -163,13 +163,14 @@ export async function importRemoteConfig(
   const timeoutMs = resolved.timeoutMs ?? 5000;
   const attempts = resolved.retry ? Math.max(1, resolved.retry.attempts ?? 6) : 1;
   let wait = resolved.retry?.initialMs ?? 1000;
-  // Retry the fetch itself first; `start()` then loads (a snapshot as the last resort) and keeps it fresh.
+  // Retry the fetch itself first; `load()` then loads (a snapshot as the last resort). No stream
+  // here: this runs in `node ace` too (§12). The provider keeps the client fresh, in `web` only.
   for (let attempt = 1; attempt < attempts; attempt++) {
     if (await withTimeoutResult(client.refresh(), timeoutMs, false)) break;
     await sleep(wait);
     wait = Math.min(wait * (resolved.retry?.multiplier ?? 1.5), resolved.retry?.maxMs ?? 5000);
   }
-  await withTimeout(client.start(), timeoutMs);
+  await withTimeout(client.load(), timeoutMs);
   if (resolved.failFast === true && client.status().source === 'none') {
     await client.stop();
     throw new RemoteConfigUnavailableError(attempts);

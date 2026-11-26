@@ -1,8 +1,9 @@
-import type { ConfigValue, VaultReference } from '@adonis-agora/config-core';
+import type { ConfigScope, ConfigValue, VaultReference } from '@adonis-agora/config-core';
 import type { ApplicationService } from '@adonisjs/core/types';
 import { assertBrowserConfig, type BrowserConfig } from './browser.js';
 import type { CryptoOptions, SecretCodec } from './crypto/secrets.js';
 import type { ConfigConsoleConfig } from './dashboard/define_config.js';
+import type { ConsoleCryptoOptions } from './federation/redis_channel.js';
 import type { SqlDatabase } from './sql.js';
 import { describeStackUse, hasLucidConnection, lucidUse, type StackUse } from './stack.js';
 import { LucidStore } from './store/lucid_store.js';
@@ -44,9 +45,20 @@ export const stores = {
   },
 };
 
-/** Resolves a `vault://provider/path#field` reference at read time. */
+/** Whose entry a vault reference is being resolved for. */
+export interface VaultContext {
+  /** The scope that holds the entry: a resolver must only read paths that app may read. */
+  scope: ConfigScope;
+}
+
+/**
+ * Resolves a `vault://provider/path#field` reference at read time. `context.scope` is the scope the
+ * entry belongs to: the resolver answers with this server's credentials, so it is the resolver's
+ * (or {@link VaultConfig.allow}'s) job to refuse a path that app should not reach.
+ */
 export type VaultResolver = (
   reference: VaultReference,
+  context: VaultContext,
 ) => ConfigValue | undefined | Promise<ConfigValue | undefined>;
 
 export interface VaultConfig {
@@ -56,6 +68,25 @@ export interface VaultConfig {
    * resolved is served masked and logged, never as a wrong value.
    */
   resolve: VaultResolver;
+  /**
+   * Whether `scope` may use `reference`. Checked before every resolution (console, MCP, control
+   * plane, federated console). Without it any writer of any app can point an entry at any path
+   * this server's vault credentials reach — set it whenever apps (or teams, with per-viewer apps)
+   * must not read each other's secrets: `allow: (ref, scope) => ref.path.startsWith(`${scope.app}/`)`.
+   */
+  allow?: (reference: VaultReference, scope: ConfigScope) => boolean;
+}
+
+/** {@link VaultConfig} as one resolver: `allow` first, then `resolve` (a refused path stays masked). */
+export function scopedVaultResolver(config: VaultConfig): VaultResolver {
+  return async (reference, context) => {
+    if (config.allow && !config.allow(reference, context.scope)) {
+      throw new Error(
+        `vault reference vault://${reference.provider}/${reference.path} is not allowed for ${context.scope.app}`,
+      );
+    }
+    return config.resolve(reference, context);
+  };
 }
 
 /** The environment this process belongs to. Default: `production` on a control plane, `NODE_ENV` on a tenant. */
@@ -172,8 +203,51 @@ export interface ConfigConsoleCommandsConfig {
    * sealed to a key made for that one request. Default `false`.
    */
   reveal?: boolean;
-  /** The partitions the other console may touch. Default: this app's own (`app`), else any. */
+  /**
+   * The partitions the other console may touch. Default: this app's own (`app`). A control plane
+   * (no `app` of its own) answers for none until you list them.
+   */
   partitions?: string[];
+  /**
+   * How this app tells a real console from anyone who can publish on Redis. Nothing to set when
+   * `@adonis-agora/crypto` is booted in this app: commands are then sealed with its
+   * `console-config` key automatically (see {@link crypto}). Otherwise set `verifyTenant` or
+   * `secret`; with none of the three, the web process refuses to boot and says which to add.
+   *
+   * Token mode (with authkit): `verifyTenant` checks the token each command carries, e.g.
+   * `authkitTenantVerifier({ issuer, resource: 'urn:agora:config' })`. The token's `partition`
+   * must be the app the command is for, and its capabilities cap what the console may do
+   * (`config:write` for set/unset/rollback, `config:secrets:read` for reveals). Commands arrive
+   * sealed to a key derived from `APP_KEY`, whose public half this app publishes in its own store
+   * for the console to read. A control plane uses its own `verifyTenant` when this is not set,
+   * and with `@adonis-agora/authkit-client` booted (its `service`), authkit app-call tokens are
+   * verified automatically. Any function works (your own JWT check, API keys). `false` turns both
+   * automatic verifiers off.
+   */
+  verifyTenant?: TenantVerifierInput | false;
+  /**
+   * Sealed with `@adonis-agora/crypto` (in the Agora Hub, in a separate crypto app, or embedded in
+   * this one): commands arrive encrypted with a crypto key (`console-config` by default) that this
+   * app may `decrypt` and the console may `encrypt`. Crypto keeps, rotates and audits the key, and
+   * no command key is derived from `APP_KEY` or published in this app's store.
+   *
+   * Automatic when nothing else is set and crypto is booted in this app: this app decrypts with its
+   * own crypto (its partition; no grant needed: a crypto server lets an app open its own
+   * `console-*` keys), and where
+   * crypto is embedded here the key is created when missing. Set it to choose the cipher or key
+   * yourself (`{ cipher: () => crypto.client! }`, or any service with `encrypt`/`decrypt` — a KMS,
+   * Vault transit — with `owns` for its ciphertext format), or `false` to turn the automatic mode
+   * off. With
+   * `verifyTenant` set too, each command must also carry a valid token; without it, whoever may
+   * encrypt with the key is the console.
+   */
+  crypto?: ConsoleCryptoOptions | false;
+  /**
+   * Shared-secret mode (no authkit): the secret this app and the console share (the console's
+   * `federatedApps.<app>.controlPlane.secret`), at least 16 characters. Every command and answer
+   * carries an HMAC under it.
+   */
+  secret?: string | { release(): string };
 }
 
 /** An app that reads its configuration from a control plane. */
@@ -207,6 +281,13 @@ export interface TenantTopologyConfig extends BaseConfig {
     snapshotPath?: string;
     /** Use server-sent events for push updates. Default `true`; polling always runs as a fallback. */
     stream?: boolean;
+    /**
+     * Keep the configuration fresh in this process (the SSE stream, or a broker watch, plus
+     * polling). Default: only in a process that serves (`web`); never in `node ace`, the REPL or
+     * tests, so they exit when done. `true` for a worker process that runs long (a queue worker
+     * started through ace); `false` to load once even in `web`.
+     */
+    watch?: boolean;
     /** Poll interval (ms). Default 30000 with streaming, 5000 without. */
     intervalMs?: number;
     /** Fail the boot when the server is unreachable AND no snapshot exists. Default `false`. */

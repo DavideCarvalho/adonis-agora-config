@@ -258,7 +258,11 @@ function Console() {
   const environments = [...new Set([...(lists?.environments ?? []), scope.environment])];
   const labels = [...new Set([...(lists?.labels ?? []), scope.label])];
   const CurrentPage = PAGES[page];
-  const readOnly = federated ? actionsUnavailableReason(federated.label, federated) : undefined;
+  const readOnly =
+    (federated ? actionsUnavailableReason(federated.label, federated) : undefined) ??
+    (meta.data?.viewer?.canWrite === false
+      ? 'Read-only: your access does not include config:write.'
+      : undefined);
   const pickApp = (app: string) => {
     const target = meta.data?.federated?.find((candidate) => candidate.id === app);
     // A federated app opens on its own environment; coming back keeps the current one.

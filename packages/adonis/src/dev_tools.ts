@@ -167,7 +167,7 @@ export function configDevTools(
       name: 'config_list_entries',
       kind: 'read',
       description:
-        'List the configuration entries of one scope: key, value (masked for secrets), whether it is a secret, whether it is reloadable (applies without a restart) and who last wrote it. Filters: `search`, `secret`, `reloadable`. Returns { items, next }.',
+        'List the configuration entries of one scope: key, value (always masked for secrets; reveal one with config_get_entry, which is audited), whether it is a secret, whether it is reloadable (applies without a restart) and who last wrote it. Filters: `search`, `secret`, `reloadable`. Returns { items, next }.',
       input: {
         type: 'object',
         properties: {
@@ -187,9 +187,10 @@ export function configDevTools(
         required: ['app'],
       },
       run: async (input, call) => {
-        const { app, environment, label, canRead } = await scopeOf(input, call);
+        const { app, environment, label } = await scopeOf(input, call);
         const at = paging(input, call);
-        const page = await admin.listEntries({ app, environment, label }, canRead, {
+        // Always masked: a secret leaves only through config_get_entry, which writes a reveal row.
+        const page = await admin.listEntries({ app, environment, label }, false, {
           page: at.page,
           size: at.size,
           filters: {
@@ -257,7 +258,8 @@ export function configDevTools(
     {
       name: 'config_get_version',
       kind: 'read',
-      description: 'One version exactly as it was: its metadata and every entry (secrets masked).',
+      description:
+        'One version exactly as it was: its metadata and every entry (secrets always masked).',
       input: {
         type: 'object',
         properties: {
@@ -269,10 +271,11 @@ export function configDevTools(
         required: ['app', 'version'],
       },
       run: async (input, call) => {
-        const { app, environment, label, canRead } = await scopeOf(input, call);
+        const { app, environment, label } = await scopeOf(input, call);
         const version = Number(input.version);
         if (!Number.isInteger(version) || version < 1) throw new DevToolError('invalid version');
-        const found = await admin.version({ app, environment, label }, version, canRead);
+        // Masked: an old version may hold a rotated secret, and this path writes no reveal row.
+        const found = await admin.version({ app, environment, label }, version, false);
         if (!found) throw new DevToolError(`no version ${version}`);
         return found;
       },
@@ -281,7 +284,7 @@ export function configDevTools(
       name: 'config_diff_versions',
       kind: 'read',
       description:
-        'The added, removed and changed keys between two versions, with before/after values (secret values masked unless this console may reveal them).',
+        'The added, removed and changed keys between two versions, with before/after values (secret values always masked).',
       input: {
         type: 'object',
         properties: {
@@ -294,7 +297,7 @@ export function configDevTools(
         required: ['app', 'from', 'to'],
       },
       run: async (input, call) => {
-        const { app, environment, label, canRead } = await scopeOf(input, call);
+        const { app, environment, label } = await scopeOf(input, call);
         const from = Number(input.from);
         const to = Number(input.to);
         if (!Number.isInteger(from) || !Number.isInteger(to)) {
@@ -303,7 +306,7 @@ export function configDevTools(
         return {
           from,
           to,
-          rows: await admin.diff({ app, environment, label }, from, to, canRead),
+          rows: await admin.diff({ app, environment, label }, from, to, false),
         };
       },
     },

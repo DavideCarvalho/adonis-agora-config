@@ -13,6 +13,8 @@ import {
   type TenantTopologyConfig,
 } from '../../src/define_config.js';
 import { resetKnownTenants } from '../../src/http/control_plane.js';
+import { importRemoteConfig } from '../../src/import_remote.js';
+import { takeTenantBootstrap, tenantBootstrapKey } from '../../src/topology/tenant_client.js';
 import { sharedSecretVerifier } from '../../src/topology/verify.js';
 import { addressOf, type Handler, serve } from '../http_harness.js';
 
@@ -71,7 +73,7 @@ function root(): URL {
 /** A real AdonisJS app: the core providers plus the config provider, no shortcuts. */
 async function boot(
   config: ConfigConfig,
-  options: { transmit?: boolean } = {},
+  options: { transmit?: boolean; environment?: 'web' | 'console' | 'repl' } = {},
 ): Promise<ApplicationService> {
   const ignitor = new IgnitorFactory()
     .withCoreProviders()
@@ -86,7 +88,7 @@ async function boot(
       config: { config },
     })
     .create(root());
-  const app = ignitor.createApp('web');
+  const app = ignitor.createApp(options.environment ?? 'web');
   await app.init();
   await app.boot();
   apps.push(app);
@@ -340,5 +342,125 @@ describe('real Adonis apps: standalone and control plane', () => {
       { channel: 'config/browser', payload: { version: expect.any(Number) } },
     ]);
     expect(tenant.browser()).toEqual({ 'site.banner': 'new' });
+  });
+});
+
+describe('a config tenant never keeps a process alive (§12)', () => {
+  /** A control plane, and every request the tenant makes to it (through a spy on fetch). */
+  async function controlPlaneWithSpy() {
+    const controlApp = await boot(
+      defineConfig({
+        topology: 'control-plane',
+        environment: 'production',
+        verifyTenant: sharedSecretVerifier({
+          partitions: { shop: { secret: 'shop-secret', capabilities: ['config:read'] } },
+        }),
+        store: stores.memory(),
+        crypto: { keys: ['a-real-app-key-of-32-characters!!'] },
+        console: false,
+      }) as ConfigConfig,
+    );
+    const runtime = await runtimeOf(controlApp);
+    const base = await serveControlPlane(runtime.controlPlane as never);
+    await new ConfigAdmin({ store: runtime.store as never }).setEntry(
+      { app: 'shop', environment: 'production', label: 'main' },
+      'db.host',
+      { value: 'db-1' },
+      { actor: 'integration' },
+    );
+    const streams: AbortSignal[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/v1/config/stream') && init?.signal) streams.push(init.signal);
+      return original(input, init);
+    }) as typeof fetch;
+    const restore = () => {
+      globalThis.fetch = original;
+    };
+    const tenant = (watch?: boolean) =>
+      defineConfig({
+        topology: 'tenant',
+        tenant: {
+          url: base,
+          partition: 'shop',
+          token: 'shop-secret',
+          environment: 'production',
+          intervalMs: 60_000,
+          keyPath: false,
+          ...(watch !== undefined ? { watch } : {}),
+        },
+      }) as TenantTopologyConfig;
+    return { streams, restore, tenant, base };
+  }
+
+  it('ace, the REPL: values loaded, no stream, nothing left open after terminate', {
+    timeout: 20_000,
+  }, async () => {
+    const { streams, restore, tenant } = await controlPlaneWithSpy();
+    try {
+      for (const environment of ['console', 'repl'] as const) {
+        const app = await boot(tenant(), { environment });
+        const runtime = await runtimeOf(app);
+        // Boot-time fetch stays: ace commands need the values.
+        expect(runtime.get('db.host')).toBe('db-1');
+        expect(runtime.client?.status().streaming).toBe(false);
+        await app.terminate();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(streams).toHaveLength(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('importRemoteConfig (it runs in ace too) loads the values once and opens no stream', {
+    timeout: 20_000,
+  }, async () => {
+    const { streams, restore, base } = await controlPlaneWithSpy();
+    try {
+      delete process.env.DB_HOST;
+      const result = await importRemoteConfig(root(), () => ({
+        url: base,
+        token: 'shop-secret',
+        partition: 'shop',
+        environment: 'production',
+        snapshotPath: false,
+      }));
+      expect(result?.source).toBe('remote');
+      expect(process.env.DB_HOST).toBe('db-1');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(streams).toHaveLength(0);
+    } finally {
+      restore();
+      takeTenantBootstrap(
+        tenantBootstrapKey({ url: base, partition: 'shop', environment: 'production' }),
+      );
+    }
+  });
+
+  it('web streams, and terminate aborts the stream; tenant.watch forces it in a worker', {
+    timeout: 20_000,
+  }, async () => {
+    const { streams, restore, tenant } = await controlPlaneWithSpy();
+    try {
+      const web = await boot(tenant());
+      const runtime = await runtimeOf(web);
+      await waitFor('the SSE stream', () => runtime.client?.status().streaming === true, 5000);
+      expect(streams).toHaveLength(1);
+      await web.terminate();
+      expect(streams[0]?.aborted).toBe(true);
+
+      const worker = await boot(tenant(true), { environment: 'console' });
+      const workerRuntime = await runtimeOf(worker);
+      await waitFor(
+        'the worker stream',
+        () => workerRuntime.client?.status().streaming === true,
+        5000,
+      );
+      await worker.terminate();
+      expect(streams.every((signal) => signal.aborted)).toBe(true);
+    } finally {
+      restore();
+    }
   });
 });

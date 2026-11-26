@@ -153,3 +153,15 @@ accepted.
 | the token is rejected with 401 | the tenant calls the source's `reset()`, fetches a new token and retries once |
 
 Nothing about the refusal says whether the app exists.
+
+## Federated console commands
+
+A console that manages a standalone app over Redis ([Federated console](/docs/config/federated-console))
+authenticates with authkit too. With authkit-client's calls between apps configured on both apps,
+nothing to set: each command carries an app-call token for the owning app (grant the console app
+`config:*` on it). Or explicitly: the console sends an `authkitTenantToken` and the app checks it
+with `authkitTenantVerifier` (`consoleCommands.verifyTenant`). With `@adonis-agora/crypto` booted in
+both apps, commands are also sealed with its `console-config` key, again with nothing to set.
+Without authkit or crypto, both sides share a `secret`. See
+[Authenticating the console](/docs/config/federated-console#authenticating-the-console).
+

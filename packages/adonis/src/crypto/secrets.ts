@@ -1,4 +1,5 @@
-import type { ConfigValue } from '@adonis-agora/config-core';
+import { createHmac } from 'node:crypto';
+import { type ConfigValue, canonicalJson } from '@adonis-agora/config-core';
 import {
   createKeyring,
   type EncrypterLike,
@@ -52,6 +53,35 @@ export interface SecretCodec {
   owns(value: unknown): value is string;
   status(sealed: string, options?: SealOptions): Promise<SealedStatus>;
   reseal(sealed: string, options?: SealOptions): Promise<string>;
+  /**
+   * A keyed digest of a secret's plaintext, for version fingerprints. Fingerprints are shown to
+   * callers that cannot read secrets, so they must not be an unkeyed hash of one.
+   */
+  digest?(value: ConfigValue): string;
+}
+
+/** Domain separation for the fingerprint key (never the key that encrypts). */
+export const CONFIG_FINGERPRINT_PURPOSE = 'config:fingerprint';
+
+/**
+ * `codec` with a {@link SecretCodec.digest}: HMAC-SHA256 of the value under a key derived from
+ * `secret` (the app key) for {@link CONFIG_FINGERPRINT_PURPOSE}. Every replica with the same app key
+ * computes the same digest, so no-op detection keeps working across processes.
+ */
+export function withFingerprintKey(codec: SecretCodec, secret: SecretLike): SecretCodec {
+  const raw = typeof secret === 'string' ? secret : secret.release();
+  const key = createHmac('sha256', raw).update(CONFIG_FINGERPRINT_PURPOSE).digest();
+  return {
+    ...codec,
+    seal: codec.seal.bind(codec),
+    open: codec.open.bind(codec),
+    owns: codec.owns.bind(codec),
+    status: codec.status.bind(codec),
+    reseal: codec.reseal.bind(codec),
+    digest(value) {
+      return createHmac('sha256', key).update(canonicalJson(value)).digest('base64url');
+    },
+  };
 }
 
 /** The AAD binding a value to its place: app/environment/key (copying it elsewhere fails to open). */

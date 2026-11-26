@@ -5,6 +5,7 @@ import {
   type ConfigEntryInput,
   type ConfigEntryState,
   type ConfigScope,
+  fingerprintOf,
 } from '@adonis-agora/config-core';
 import { entryAad, type SecretCodec } from '../crypto/secrets.js';
 import {
@@ -164,6 +165,17 @@ export class LucidStore implements ConfigStore {
     return this.#latest(this.db, scope);
   }
 
+  async latestVersion(scope: ConfigScope): Promise<number> {
+    const rows = await query<{ version: number | string }>(
+      this.db,
+      `SELECT version FROM config_versions
+       WHERE app = ? AND environment = ? AND label = ?
+       ORDER BY version DESC LIMIT 1`,
+      [scope.app, scope.environment, scope.label],
+    );
+    return rows[0] ? toNumber(rows[0].version) : 0;
+  }
+
   async readVersion(scope: ConfigScope, version: number): Promise<ConfigDocument | null> {
     const rows = await query<VersionRow>(
       this.db,
@@ -230,7 +242,7 @@ export class LucidStore implements ConfigStore {
       ...(document.message !== undefined ? { message: document.message } : {}),
       entries: counts.entries,
       secrets: counts.secrets,
-      fingerprint: document.fingerprint,
+      fingerprint: this.#sealer.publicFingerprint(document.fingerprint),
     };
   }
 
@@ -314,10 +326,14 @@ export class LucidStore implements ConfigStore {
       try {
         return await this.db.transaction(async (trx) => {
           const current = await this.#latest(trx, scope);
-          const result = applyChanges(current, changes, context);
+          const result = applyChanges(current, changes, context, this.#sealer.fingerprintOptions);
           const document = withScope(result.document, scope);
           if (result.changed) await this.#insert(trx, document, result.touched, context);
-          return { document, changed: result.changed, touched: result.touched };
+          return {
+            document: this.#sealer.withPublicFingerprint(document),
+            changed: result.changed,
+            touched: result.touched,
+          };
         });
       } catch (error) {
         lastError = error;
@@ -352,9 +368,12 @@ export class LucidStore implements ConfigStore {
             createdAt: context.now,
             createdBy: context.actor,
             ...(context.message !== undefined ? { message: context.message } : {}),
-            fingerprint: target.fingerprint,
+            fingerprint: fingerprintOf(entries, this.#sealer.fingerprintOptions),
           };
-          if (current?.fingerprint === document.fingerprint) {
+          if (
+            current &&
+            fingerprintOf(current.entries, this.#sealer.fingerprintOptions) === document.fingerprint
+          ) {
             return { document: current, changed: false };
           }
           await query(
@@ -395,7 +414,7 @@ export class LucidStore implements ConfigStore {
               context.now,
             ],
           );
-          return { document, changed: true };
+          return { document: this.#sealer.withPublicFingerprint(document), changed: true };
         });
       } catch (error) {
         lastError = error;
@@ -598,6 +617,17 @@ export class LucidStore implements ConfigStore {
       createdAt: row.created_at,
       ...(row.updated_at ? { updatedAt: String(row.updated_at) } : {}),
     }));
+  }
+
+  async removeTenantKeys(app: string): Promise<{ removed: number }> {
+    const rows = await query<{ id: string }>(
+      this.db,
+      'SELECT id FROM config_tenant_keys WHERE app = ?',
+      [app],
+    );
+    if (rows.length === 0) return { removed: 0 };
+    await query(this.db, 'DELETE FROM config_tenant_keys WHERE app = ?', [app]);
+    return { removed: rows.length };
   }
 
   async registerTenantKey(key: TenantPublicKey): Promise<{ created: boolean }> {

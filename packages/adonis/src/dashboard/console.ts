@@ -6,7 +6,6 @@ import {
   type ConfigEntryInput,
   type ConfigScope,
   type ConfigValue,
-  capabilityAllows,
   DEFAULT_LABEL,
   toConfigValue,
 } from '@adonis-agora/config-core';
@@ -15,9 +14,11 @@ import type { HttpContext } from '@adonisjs/core/http';
 import type { ConfigAdmin, EntryRow } from '../admin.js';
 import {
   type CommandMeta,
+  configConsoleAllows,
   FederatedAppError,
   type FederatedConfigApp,
   type FederatedConfigApps,
+  viewerConsoleCapabilities,
 } from '../federation/console.js';
 import { booleanFilter, parseListQuery } from '../http/list.js';
 import { resolveAccessDeniedPage } from './access_denied_page.js';
@@ -133,6 +134,8 @@ export class ConfigConsole {
   readonly #grants = new WeakMap<HttpContext, string[]>();
   /** The authorizer's `capabilities` for each request it allowed, when it said. */
   readonly #capabilities = new WeakMap<HttpContext, string[]>();
+  /** The authorizer's `access` for each request it allowed, when it said. */
+  readonly #access = new WeakMap<HttpContext, 'read' | 'write'>();
   #warned = false;
 
   constructor(private readonly options: ConfigConsoleOptions) {
@@ -208,6 +211,7 @@ export class ConfigConsole {
       if (Array.isArray(decision.capabilities)) {
         this.#capabilities.set(ctx, decision.capabilities);
       }
+      if (decision.access !== undefined) this.#access.set(ctx, decision.access);
       return true;
     }
     if (decision.status === 302) {
@@ -345,12 +349,35 @@ export class ConfigConsole {
   /** What a command to another app carries: the viewer (the actor) and what it was granted. */
   async #commandMeta(ctx: HttpContext): Promise<CommandMeta> {
     const actor = await this.#actor(ctx);
-    const capabilities = this.#capabilities.get(ctx);
+    // Always sent: the viewer's grant from `authorize`, or (when it does not narrow) every config
+    // console capability. The owning app refuses a command without them.
+    const capabilities = this.#viewerCapabilities(ctx);
     return {
       actor: actor.id,
-      ...(capabilities !== undefined ? { capabilities } : {}),
+      capabilities,
       ...(this.options.config.appLabel !== undefined ? { via: this.options.config.appLabel } : {}),
     };
+  }
+
+  /**
+   * What the viewer may do, on this console's own apps and on federated ones alike: its
+   * `authorize` capabilities narrowed to config's console set (`access: 'read'` drops writes), or
+   * everything when `authorize` said nothing.
+   */
+  #viewerCapabilities(ctx: HttpContext): string[] {
+    return viewerConsoleCapabilities(this.#capabilities.get(ctx), this.#access.get(ctx));
+  }
+
+  /** Whether `authorize` narrowed this viewer (capabilities or `access`). */
+  #narrowed(ctx: HttpContext): boolean {
+    return this.#capabilities.has(ctx) || this.#access.has(ctx);
+  }
+
+  /** Refuses a viewer that lacks `capability` (`403`, the wording every Agora console uses). */
+  #demand(ctx: HttpContext, capability: string): void {
+    if (!configConsoleAllows(this.#viewerCapabilities(ctx), capability)) {
+      throw new HttpError(403, `the viewer lacks ${capability}`);
+    }
   }
 
   /** Whether the viewer's grant covers `app` (no grant, or `'*'`: every app). */
@@ -483,7 +510,18 @@ export class ConfigConsole {
         label: DEFAULT_LABEL,
       },
       secrets: this.options.secrets,
-      canRevealSecrets: this.options.config.revealSecrets,
+      canRevealSecrets:
+        this.options.config.revealSecrets &&
+        configConsoleAllows(this.#viewerCapabilities(ctx), CONFIG_SCOPES.secretsRead),
+      // What the viewer may do, when `authorize` narrowed it: the UI disables the rest.
+      ...(this.#narrowed(ctx)
+        ? {
+            viewer: {
+              capabilities: this.#viewerCapabilities(ctx),
+              canWrite: configConsoleAllows(this.#viewerCapabilities(ctx), CONFIG_SCOPES.write),
+            },
+          }
+        : {}),
       topology: this.options.topology,
       actor: actor.id,
       ...(federated.length > 0
@@ -570,6 +608,7 @@ export class ConfigConsole {
   }
 
   async setEntry(ctx: HttpContext) {
+    this.#demand(ctx, CONFIG_SCOPES.write);
     const { scope, admin, federated } = await this.#target(ctx);
     const key = String((ctx.params as Record<string, string>).key ?? '');
     assertConfigKey(key);
@@ -633,6 +672,7 @@ export class ConfigConsole {
   }
 
   async unsetEntry(ctx: HttpContext) {
+    this.#demand(ctx, CONFIG_SCOPES.write);
     const { scope, admin, federated } = await this.#target(ctx);
     const key = String((ctx.params as Record<string, string>).key ?? '');
     assertConfigKey(key);
@@ -652,6 +692,7 @@ export class ConfigConsole {
     if (!this.options.config.revealSecrets) {
       throw new HttpError(403, 'revealing secrets is disabled on this console');
     }
+    this.#demand(ctx, CONFIG_SCOPES.secretsRead);
     const { scope, admin, federated } = await this.#target(ctx);
     const key = String((ctx.params as Record<string, string>).key ?? '');
     let entry: EntryRow | null;
@@ -659,12 +700,6 @@ export class ConfigConsole {
       // Another app's secret: only for a viewer `authorize` granted `config:secrets:read`; the app
       // checks it again, reads the value itself and records the reveal with this viewer as actor.
       const meta = await this.#commandMeta(ctx);
-      if (!capabilityAllows(meta.capabilities ?? [], CONFIG_SCOPES.secretsRead)) {
-        throw new HttpError(
-          403,
-          `revealing another app's secret needs ${CONFIG_SCOPES.secretsRead} in this console's authorize grant`,
-        );
-      }
       entry = await federated.reveal(scope, key, meta);
     } else {
       const actor = await this.#actor(ctx);
@@ -730,6 +765,7 @@ export class ConfigConsole {
   }
 
   async rollback(ctx: HttpContext) {
+    this.#demand(ctx, CONFIG_SCOPES.write);
     const { scope, admin, federated } = await this.#target(ctx);
     const body = this.#body(ctx);
     const to = Number(body.to);

@@ -35,6 +35,7 @@ export default defineConfig({
 | `required` | `false` | fail the boot when the server is unreachable and no snapshot exists |
 | `stream` | `true` | server-sent events; polling always runs |
 | `intervalMs` | `30000` / `5000` | poll interval, with / without streaming |
+| `watch` | `true` in `web` only | keep the values fresh (stream + polling) in this process; `node ace`, the REPL and tests load once and exit. `true` for a long-running worker started through ace |
 | `reloadable` | `[]` | extra keys that may hot-reload, exact or `prefix.*` |
 | `localEnv` | on outside production | let `process.env` win per key (`DB_PORT` for `db.port`) |
 | `env` | `false` | also write the values into `process.env` (unset variables only) |

@@ -118,6 +118,10 @@ set -a; eval "$(node ace config:pull --app=streaming)"; set +a
 varlock run -- node ace serve --hmr
 ```
 
+A value with anything a shell would interpret (spaces, `$`, `;`, quotes, line breaks) is printed
+single-quoted, so `eval` assigns it and never runs it. With `--write`, a value holding a line break
+is not written (it would add lines to the file) and the command lists it.
+
 `--secrets` asks for secret values (the token needs `config:secrets:read`); an encrypted
 `.env.local` (`varlock(...)`) is never written — the command refuses and exits 1. A written file is
 added to `.gitignore`.

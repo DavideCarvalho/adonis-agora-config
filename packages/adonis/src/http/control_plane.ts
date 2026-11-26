@@ -11,6 +11,7 @@ import {
   etagMatches,
   etagOf,
   fingerprintOf,
+  isValidScopeName,
   maskDocument,
   parseVaultReference,
 } from '@adonis-agora/config-core';
@@ -94,6 +95,12 @@ export interface ControlPlaneOptions {
 
 const presence = new Map<string, TenantPresence>();
 
+/**
+ * At most this many presence rows are kept (oldest activity dropped first). A token not bound to a
+ * label may name any label, so without a cap every distinct `?label=` would stay in memory forever.
+ */
+export const MAX_TENANT_PRESENCE = 1_000;
+
 /** Tenants that called this control plane since boot, newest activity last (shown in the console). */
 export function knownTenants(): TenantPresence[] {
   return [...presence.values()].sort((a, b) => a.partition.localeCompare(b.partition));
@@ -153,7 +160,10 @@ export class ControlPlane {
     router.any?.(pattern, handler);
   }
 
-  async #authenticate(ctx: HttpContext, required: string): Promise<VerifiedTenant | null> {
+  async #authenticate(
+    ctx: HttpContext,
+    ...required: [string, ...string[]]
+  ): Promise<VerifiedTenant | null> {
     const headers = requestHeaders(ctx);
     const claimed = ctx.request.header('x-config-app') ?? undefined;
     let verified: VerifiedTenant | null;
@@ -181,24 +191,43 @@ export class ControlPlane {
       ctx.response.status(401).send({ error: 'unauthorized' });
       return null;
     }
-    if (!capabilityAllows(verified.capabilities, required)) {
-      ctx.response.status(403).send({ error: `token lacks the ${required} capability` });
-      return null;
+    for (const capability of required) {
+      if (!capabilityAllows(verified.capabilities, capability)) {
+        ctx.response.status(403).send({ error: `token lacks the ${capability} capability` });
+        return null;
+      }
     }
     return verified;
   }
 
-  #scope(verified: VerifiedTenant, ctx?: HttpContext): ConfigScope {
-    const queryLabel = ctx ? (ctx.request.qs().label as string | undefined) : undefined;
-    return {
-      app: verified.partition,
-      environment: verified.environment ?? this.options.environment,
-      label: verified.label ?? queryLabel ?? DEFAULT_LABEL,
-    };
+  /**
+   * The scope the request reads: the app and environment from the token, the label from the token
+   * or else `?label=`. A label that is not a plain name (control or non-latin1 characters, quotes,
+   * over 128 characters) is answered `400` here: it would otherwise reach the ETag header, where
+   * Node throws after the handler returned and takes the process down.
+   */
+  #scope(verified: VerifiedTenant, ctx: HttpContext): ConfigScope | null {
+    const raw = ctx.request.qs().label as unknown;
+    const queryLabel = raw === undefined || raw === '' ? undefined : raw;
+    const label = verified.label ?? queryLabel ?? DEFAULT_LABEL;
+    const environment = verified.environment ?? this.options.environment;
+    if (!isValidScopeName(label) || !isValidScopeName(environment)) {
+      ctx.response.status(400).send({ error: 'invalid label or environment' });
+      return null;
+    }
+    return { app: verified.partition, environment, label };
   }
 
   #record(scope: ConfigScope, verified: VerifiedTenant, version: number): void {
-    presence.set(`${scope.app}\u0000${scope.environment}\u0000${scope.label}`, {
+    const key = `${scope.app}\u0000${scope.environment}\u0000${scope.label}`;
+    // Re-insert so the Map's order is least-recently-seen first, then drop the oldest past the cap.
+    presence.delete(key);
+    while (presence.size >= MAX_TENANT_PRESENCE) {
+      const oldest = presence.keys().next().value;
+      if (oldest === undefined) break;
+      presence.delete(oldest);
+    }
+    presence.set(key, {
       partition: scope.app,
       environment: scope.environment,
       label: scope.label,
@@ -215,13 +244,15 @@ export class ControlPlane {
     const view = maskDocument(document, canReadSecrets, { serveSealed: true });
     if (!canReadSecrets || !this.options.vault) return view;
     const entries: Record<string, ConfigEntryView> = {};
+    // The entry's own scope: the resolver (and `vault.allow`) decides what that app may reach.
+    const scope = { app: document.app, environment: document.environment, label: document.label };
     for (const [key, entry] of Object.entries(view.entries)) {
       if (entry.vault === undefined) {
         entries[key] = entry;
         continue;
       }
       try {
-        const resolved = await this.options.vault(parseVaultReference(entry.vault));
+        const resolved = await this.options.vault(parseVaultReference(entry.vault), { scope });
         if (resolved === undefined) {
           const { value: _value, ...rest } = entry;
           entries[key] = { ...rest, masked: true };
@@ -282,6 +313,21 @@ export class ControlPlane {
     const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
     if (!verified) return;
     const scope = this.#scope(verified, ctx);
+    if (!scope) return;
+    // A conditional GET for the current version is answered from the version number alone: no
+    // decryption and no vault round trips for a tenant polling an unchanged scope.
+    const conditional = ctx.request.header('if-none-match');
+    if (conditional && this.options.store.latestVersion) {
+      const current = await this.options.store.latestVersion(scope);
+      const etag = etagOf(scope.app, scope.environment, scope.label, current);
+      if (etagMatches(conditional, etag)) {
+        this.#record(scope, verified, current);
+        ctx.response.header('etag', etag);
+        ctx.response.header('x-config-version', String(current));
+        ctx.response.header('cache-control', 'no-cache');
+        return ctx.response.status(304).send('');
+      }
+    }
     const { view } = await this.#snapshot(scope, verified);
     this.#record(scope, verified, view.version);
     const etag = etagOf(scope.app, scope.environment, scope.label, view.version);
@@ -309,6 +355,7 @@ export class ControlPlane {
     const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
     if (!verified) return;
     const scope = this.#scope(verified, ctx);
+    if (!scope) return;
     ctx.response.header('cache-control', 'no-store');
     return ctx.response.json({
       resource: CONFIG_RESOURCE,
@@ -345,7 +392,9 @@ export class ControlPlane {
    */
   async putKeys(ctx: HttpContext) {
     this.#cors(ctx);
-    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
+    // Registering the key future secrets are sealed to is a write that decides who can read them:
+    // only a token that receives secrets (the app itself) may do it, never a plain reader.
+    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read, CONFIG_SCOPES.secretsRead);
     if (!verified) return;
     try {
       const keys = await registerTenantKeys(this.options.store, verified.partition, bodyOf(ctx), {
@@ -382,9 +431,11 @@ export class ControlPlane {
    */
   async postSealed(ctx: HttpContext) {
     this.#cors(ctx);
-    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
+    // Replaces secret values: the same bar as registering the keys they are sealed to.
+    const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read, CONFIG_SCOPES.secretsRead);
     if (!verified) return;
     const scope = this.#scope(verified, ctx);
+    if (!scope) return;
     const body = bodyOf(ctx) as { version?: unknown; entries?: unknown };
     if (typeof body.version !== 'number' || !Number.isInteger(body.version) || body.version < 1) {
       return ctx.response.status(400).send({ error: 'version must be a positive integer' });
@@ -455,6 +506,7 @@ export class ControlPlane {
     const verified = await this.#authenticate(ctx, CONFIG_SCOPES.read);
     if (!verified) return;
     const scope = this.#scope(verified, ctx);
+    if (!scope) return;
     const body = new PassThrough();
     const send = (chunk: string) => {
       if (!body.writableEnded) body.write(chunk);
@@ -506,6 +558,9 @@ export class ControlPlane {
       cleanups.push(() => clearTimeout(expiry));
     }
     ctx.request.request.once('close', close);
+    // The client may have gone while the store was read above: its 'close' already fired, so the
+    // listener never would, and the bus subscription and timers would live for good.
+    if (ctx.request.request.socket?.destroyed) close();
 
     ctx.response.header('content-type', 'text/event-stream');
     ctx.response.header('cache-control', 'no-cache, no-transform');
