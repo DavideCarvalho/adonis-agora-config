@@ -1,5 +1,11 @@
 # @adonis-agora/config-dashboard
 
+## 1.0.0-rc.3
+
+### Minor Changes
+
+- [`3ea42fa`](https://github.com/DavideCarvalho/adonis-agora-config/commit/3ea42fa9743ad2efdcd8a0e31e5e39767a8ba1a7) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - The console follows the viewer's capabilities: actions the viewer may not run are disabled with the reason, using the shared console capability rules (write implies read; a `*` counts only as the last segment of a capability). Ships with the federated-console authentication changes.
+
 ## 1.0.0-rc.2
 
 ### Minor Changes
