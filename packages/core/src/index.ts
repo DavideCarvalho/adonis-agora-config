@@ -7,6 +7,7 @@ export {
   coerceEnvValue,
   envNameOf,
   envValueOf,
+  isReservedKeySegment,
   isVaultReference,
   keyFromEnvName,
   parseConfigValue,

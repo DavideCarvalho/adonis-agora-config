@@ -33,6 +33,19 @@ describe('flatten / unflatten', () => {
     expect(() => unflattenObject({ 'db.host': 'y', db: 'x' })).toThrow(/both a value and a path/);
   });
 
+  it('refuses reserved segments and never touches Object.prototype', () => {
+    for (const path of [
+      '__proto__.polluted',
+      'a.__proto__.polluted',
+      'constructor.prototype.polluted',
+      'a.prototype',
+      '__proto__',
+    ]) {
+      expect(() => unflattenObject({ [path]: 'PWNED' })).toThrow(/reserved segment/);
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it('reads the values of a document', () => {
     const at = new Date(0).toISOString();
     const entries: Record<string, ConfigEntryState> = {

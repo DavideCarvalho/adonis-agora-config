@@ -27,6 +27,12 @@ describe('keys', () => {
     }
   });
 
+  it('rejects reserved segments', () => {
+    for (const key of ['__proto__.polluted', 'a.constructor', 'a.prototype.b']) {
+      expect(() => assertConfigKey(key)).toThrow(/reserved segment/);
+    }
+  });
+
   it('parses and builds vault references', () => {
     expect(parseVaultReference('vault://aws/prod/db#password')).toEqual({
       provider: 'aws',

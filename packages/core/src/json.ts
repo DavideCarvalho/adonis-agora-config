@@ -1,3 +1,4 @@
+import { isReservedKeySegment } from './keys.js';
 import type { ConfigEntryState, ConfigValue } from './types.js';
 
 /** JSON with sorted object keys: the same value always has the same text (and hash). */
@@ -40,15 +41,23 @@ export function flattenObject(
   return out;
 }
 
-/** Flat dot paths → a nested object. `db.host` and `db` in one map: `db` must be an object. */
+/**
+ * Flat dot paths → a nested object. `db.host` and `db` in one map: `db` must be an object. A path
+ * with a `__proto__`, `constructor` or `prototype` segment throws.
+ */
 export function unflattenObject(flat: Record<string, ConfigValue>): Record<string, ConfigValue> {
   const root: Record<string, ConfigValue> = {};
   for (const [path, value] of Object.entries(flat)) {
     const segments = path.split('.');
+    for (const segment of segments) {
+      if (isReservedKeySegment(segment)) {
+        throw new Error(`config: "${path}" has a reserved segment ("${segment}")`);
+      }
+    }
     let cursor: Record<string, ConfigValue> = root;
     for (let index = 0; index < segments.length - 1; index += 1) {
       const segment = segments[index]!;
-      const next = cursor[segment];
+      const next = Object.hasOwn(cursor, segment) ? cursor[segment] : undefined;
       if (next === undefined) {
         const created: Record<string, ConfigValue> = {};
         cursor[segment] = created;
@@ -62,7 +71,8 @@ export function unflattenObject(flat: Record<string, ConfigValue>): Record<strin
       }
     }
     const last = segments[segments.length - 1]!;
-    if (cursor[last] !== undefined) throw new Error(`config: "${path}" is both a value and a path`);
+    if (Object.hasOwn(cursor, last) && cursor[last] !== undefined)
+      throw new Error(`config: "${path}" is both a value and a path`);
     cursor[last] = value;
   }
   return root;
