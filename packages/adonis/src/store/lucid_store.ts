@@ -5,6 +5,7 @@ import {
   type ConfigEntryInput,
   type ConfigEntryState,
   type ConfigScope,
+  fingerprintOf,
 } from '@adonis-agora/config-core';
 import { entryAad, type SecretCodec } from '../crypto/secrets.js';
 import {
@@ -230,7 +231,7 @@ export class LucidStore implements ConfigStore {
       ...(document.message !== undefined ? { message: document.message } : {}),
       entries: counts.entries,
       secrets: counts.secrets,
-      fingerprint: document.fingerprint,
+      fingerprint: this.#sealer.publicFingerprint(document.fingerprint),
     };
   }
 
@@ -314,10 +315,14 @@ export class LucidStore implements ConfigStore {
       try {
         return await this.db.transaction(async (trx) => {
           const current = await this.#latest(trx, scope);
-          const result = applyChanges(current, changes, context);
+          const result = applyChanges(current, changes, context, this.#sealer.fingerprintOptions);
           const document = withScope(result.document, scope);
           if (result.changed) await this.#insert(trx, document, result.touched, context);
-          return { document, changed: result.changed, touched: result.touched };
+          return {
+            document: this.#sealer.withPublicFingerprint(document),
+            changed: result.changed,
+            touched: result.touched,
+          };
         });
       } catch (error) {
         lastError = error;
@@ -352,9 +357,12 @@ export class LucidStore implements ConfigStore {
             createdAt: context.now,
             createdBy: context.actor,
             ...(context.message !== undefined ? { message: context.message } : {}),
-            fingerprint: target.fingerprint,
+            fingerprint: fingerprintOf(entries, this.#sealer.fingerprintOptions),
           };
-          if (current?.fingerprint === document.fingerprint) {
+          if (
+            current &&
+            fingerprintOf(current.entries, this.#sealer.fingerprintOptions) === document.fingerprint
+          ) {
             return { document: current, changed: false };
           }
           await query(
@@ -395,7 +403,7 @@ export class LucidStore implements ConfigStore {
               context.now,
             ],
           );
-          return { document, changed: true };
+          return { document: this.#sealer.withPublicFingerprint(document), changed: true };
         });
       } catch (error) {
         lastError = error;

@@ -73,7 +73,7 @@ export class MemoryStore implements ConfigStore {
           ...(document.message !== undefined ? { message: document.message } : {}),
           entries: counts.entries,
           secrets: counts.secrets,
-          fingerprint: document.fingerprint,
+          fingerprint: this.#sealer.publicFingerprint(document.fingerprint),
         };
       }),
       total: all.length,
@@ -101,7 +101,7 @@ export class MemoryStore implements ConfigStore {
     const key = scopeKey(scope);
     const versions = this.#versions.get(key) ?? [];
     const current = await this.#latest(scope);
-    const result = applyChanges(current, changes, context);
+    const result = applyChanges(current, changes, context, this.#sealer.fingerprintOptions);
     const document = withScope(result.document, scope);
     if (result.changed) {
       versions.push(await this.#sealer.sealDocument(document));
@@ -117,7 +117,11 @@ export class MemoryStore implements ConfigStore {
         )),
       );
     }
-    return { document, changed: result.changed, touched: result.touched };
+    return {
+      document: this.#sealer.withPublicFingerprint(document),
+      changed: result.changed,
+      touched: result.touched,
+    };
   }
 
   async rollback(
@@ -134,8 +138,11 @@ export class MemoryStore implements ConfigStore {
         { ...entry, updatedAt: context.now, updatedBy: context.actor },
       ]),
     );
-    const fingerprint = fingerprintOf(entries);
-    if (current?.fingerprint === fingerprint) {
+    const fingerprint = fingerprintOf(entries, this.#sealer.fingerprintOptions);
+    if (
+      current &&
+      fingerprintOf(current.entries, this.#sealer.fingerprintOptions) === fingerprint
+    ) {
       return { document: current, changed: false };
     }
     const document: ConfigDocument = {
@@ -160,7 +167,7 @@ export class MemoryStore implements ConfigStore {
       ...(context.message !== undefined ? { message: context.message } : {}),
       at: context.now,
     });
-    return { document, changed: true };
+    return { document: this.#sealer.withPublicFingerprint(document), changed: true };
   }
 
   async listAudit(
@@ -206,7 +213,7 @@ export class MemoryStore implements ConfigStore {
           ...(document.message !== undefined ? { message: document.message } : {}),
           entries: counts.entries,
           secrets: counts.secrets,
-          fingerprint: document.fingerprint,
+          fingerprint: this.#sealer.publicFingerprint(document.fingerprint),
         };
       });
   }

@@ -34,7 +34,13 @@ export default defineConfig({
         // A connection in THIS app's config/database.ts that reaches its tables.
         store: { connection: 'entretextos', schema: 'public' },
         // A connection in THIS app's config/redis.ts, and the app's consoleCommands.prefix.
-        controlPlane: { connection: 'main', prefix: 'entretextos' },
+        // `secret` is shared with that app (its consoleCommands.secret, 16+ characters): every
+        // command and answer is signed with it. Required unless `actions: false`.
+        controlPlane: {
+          connection: 'main',
+          prefix: 'entretextos',
+          secret: env.get('CONFIG_CONSOLE_SECRET'),
+        },
         // environment: 'production',
         // actions: false,   // browse only from here
         // timeoutMs: 15_000,
@@ -88,13 +94,18 @@ export default defineConfig({
   consoleCommands: {
     connection: 'main',
     prefix: 'entretextos',
+    // Shared with the console (its federatedApps.<app>.controlPlane.secret), 16+ characters.
+    secret: env.get('CONFIG_CONSOLE_SECRET'),
     actions: true, // set, unset and roll back from the other console
     reveal: true,  // reveal a secret to a viewer granted config:secrets:read
   },
 })
 ```
 
-It needs `@adonisjs/redis` and its `APP_KEY`. Every web instance listens; exactly one runs each
+It needs `@adonisjs/redis`, its `APP_KEY` and the shared `secret`. Without the secret the web
+process refuses to boot. Every command and answer carries an HMAC under the secret, a command older
+than a minute is refused, and each one runs at most once. Set, unset and rollback need the viewer to
+hold `config:write`, a reveal `config:secrets:read`. Every web instance listens; exactly one runs each
 command. With `actions` and `reveal` off (the default), the other console only browses.
 
 Changes made from the other console are this app's own: a new version in its store, an audit row

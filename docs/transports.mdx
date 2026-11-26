@@ -76,7 +76,10 @@ export default defineConfig({
 `connection` is a `@adonisjs/redis` connection name (`config/redis.ts`); omit it for `main`. The
 channel/key contain the app, environment and label, so two scopes never collide. The snapshot key is
 what lets a tenant boot when the HTTP control plane is unreachable **and** it has no local snapshot;
-it holds the masked document only (never a secret).
+it holds the masked document only (never a secret). Pass the same `secret` (16+ characters) to
+`transports.redis({ secret })` on the control plane and its tenants: the snapshot is signed with it,
+and a tenant only boots from a snapshot whose signature checks out (without a secret it never boots
+from one).
 
 ## Durable
 

@@ -51,8 +51,11 @@ describe('configConsoleCommandHandler', () => {
   });
 
   it('hands out the write key only with actions on', async () => {
-    expect(await (await owner()).handler(command('writeKey'))).toEqual(keys.publicKey);
-    expect(await (await owner({ actions: false })).handler(command('writeKey'))).toBeNull();
+    const write = { capabilities: ['config:write'] };
+    expect(await (await owner()).handler(command('writeKey', [], write))).toEqual(keys.publicKey);
+    expect(
+      await (await owner({ actions: false })).handler(command('writeKey', [], write)),
+    ).toBeNull();
     expect(keys.publicKey).not.toHaveProperty('d');
   });
 
@@ -68,12 +71,33 @@ describe('configConsoleCommandHandler', () => {
     const sealed = sealTo(keys.publicKey, JSON.stringify({ value: 'v1' }), {
       aad: writeAad('et', scope, 'a.b'),
     });
-    await handler(command('setEntry', [{ scope, key: 'a.b', sealed }]));
+    const write = { capabilities: ['config:write'] };
+    await handler(command('setEntry', [{ scope, key: 'a.b', sealed }], write));
     expect((await admin.getEntry(scope, 'a.b', { canReadSecrets: false }))?.value).toBe('v1');
     // The same ciphertext replayed onto another key does not open.
     await expect(
-      handler(command('setEntry', [{ scope, key: 'c.d', sealed }])),
+      handler(command('setEntry', [{ scope, key: 'c.d', sealed }], write)),
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('refuses a command without the viewer capabilities, and changes without config:write', async () => {
+    const { handler, admin } = await owner();
+    const sealed = sealTo(keys.publicKey, JSON.stringify({ value: 'v1' }), {
+      aad: writeAad('et', scope, 'a.b'),
+    });
+    const set = [{ scope, key: 'a.b', sealed }];
+    await expect(handler(command('setEntry', set))).rejects.toMatchObject({ status: 403 });
+    await expect(
+      handler(command('setEntry', set, { capabilities: ['config:read', 'config:secrets:read'] })),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      handler(command('unsetEntry', [{ scope, key: 'api.token' }], { capabilities: [] })),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      handler(command('rollback', [{ scope, to: 1 }], { capabilities: ['config:read'] })),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(handler(command('writeKey'))).rejects.toMatchObject({ status: 403 });
+    expect(await admin.getEntry(scope, 'a.b', { canReadSecrets: false })).toBeNull();
   });
 
   it('reveals sealed to the requester, and only to config:secrets:read', async () => {
@@ -148,7 +172,9 @@ describe('the federated read side', () => {
       store: new MemoryStore(),
       channel: new RedisConsoleChannel({ client: bus.connection(), prefix: 'et' }),
     });
-    await expect(app.unsetEntry(scope, 'a.b', undefined, { actor: 'ana' })).rejects.toMatchObject({
+    await expect(
+      app.unsetEntry(scope, 'a.b', undefined, { actor: 'ana', capabilities: [] }),
+    ).rejects.toMatchObject({
       status: 403,
     });
     expect(bus.published).toEqual([]);
@@ -176,6 +202,34 @@ describe('federatedApps config', () => {
     expect(() => validateFederatedConfigApp('et', { ...entry, timeoutMs: -1 }, redis)).toThrow(
       /timeoutMs/,
     );
+  });
+
+  it('requires the shared secret (web) for an entry that may act', () => {
+    const web = { requireSecret: true };
+    expect(() => validateFederatedConfigApp('et', entry, redis, web)).toThrow(
+      /controlPlane\.secret/,
+    );
+    expect(() =>
+      validateFederatedConfigApp(
+        'et',
+        { ...entry, controlPlane: { prefix: 'et', secret: 'short' } },
+        redis,
+        web,
+      ),
+    ).toThrow(/controlPlane\.secret/);
+    expect(() =>
+      validateFederatedConfigApp(
+        'et',
+        { ...entry, controlPlane: { prefix: 'et', secret: 'a-shared-secret-0123456789' } },
+        redis,
+        web,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateFederatedConfigApp('et', { ...entry, actions: false }, redis, web),
+    ).not.toThrow();
+    // Ace never sends commands: no secret needed there.
+    expect(() => validateFederatedConfigApp('et', entry, redis)).not.toThrow();
   });
 
   it('keeps federatedApps and appLabel in the resolved console config', () => {

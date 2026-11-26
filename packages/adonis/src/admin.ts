@@ -222,7 +222,7 @@ export class ConfigAdmin {
     }
     if (entry.vault !== undefined && options.canReadSecrets && this.#vault) {
       try {
-        const resolved = await this.#vault(parseVaultReference(entry.vault));
+        const resolved = await this.#vault(parseVaultReference(entry.vault), { scope });
         if (resolved !== undefined) {
           return { ...this.#visible(key, entry, true), value: resolved, masked: false };
         }

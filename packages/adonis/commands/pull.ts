@@ -5,7 +5,13 @@ import { BaseCommand, flags } from '@adonisjs/core/ace';
 import type { CommandOptions } from '@adonisjs/core/types/ace';
 import { ConfigAdmin } from '../src/admin.js';
 import { createConfigClient } from '../src/client.js';
-import { ensureGitignore, hasEncryptedValues, upsertConfigBlock } from '../src/env_file.js';
+import {
+  ENV_NAME,
+  ensureGitignore,
+  hasEncryptedValues,
+  shellQuote,
+  upsertConfigBlock,
+} from '../src/env_file.js';
 import { getRuntime, hasRuntime } from '../src/services/accessor.js';
 import type { TenantTokenSource } from '../src/topology/token.js';
 import { cliActor } from './shared.js';
@@ -99,7 +105,15 @@ export default class ConfigPull extends BaseCommand {
         if (this.json) {
           process.stdout.write(`${JSON.stringify({ source, scope, env })}\n`);
         } else {
-          for (const [key, value] of Object.entries(env)) this.logger.log(`${key}=${value}`);
+          // Quoted for a shell: the docs suggest `eval "$(node ace config:pull)"`, and a value is
+          // whatever anyone with write access to the scope stored.
+          for (const [key, value] of Object.entries(env)) {
+            if (!ENV_NAME.test(key)) {
+              this.logger.warning(`skipped ${JSON.stringify(key)}: not a valid variable name`);
+              continue;
+            }
+            this.logger.log(`${key}=${shellQuote(value)}`);
+          }
         }
         return;
       }
@@ -132,6 +146,7 @@ export default class ConfigPull extends BaseCommand {
             file: relative,
             added: result.added,
             skipped: result.skipped,
+            rejected: result.rejected,
             gitignore,
           })}\n`,
         );
@@ -142,6 +157,11 @@ export default class ConfigPull extends BaseCommand {
       );
       if (result.skipped.length > 0) {
         this.logger.info(`local values kept: ${result.skipped.join(', ')}`);
+      }
+      if (result.rejected.length > 0) {
+        this.logger.warning(
+          `not written (invalid name, or a value with a line break): ${result.rejected.join(', ')}`,
+        );
       }
       if (gitignore === 'added') this.logger.info(`added ${relative} to .gitignore`);
       if (result.added.length === 0) {

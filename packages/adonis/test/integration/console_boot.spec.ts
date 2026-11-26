@@ -91,3 +91,21 @@ describe('console routes on a real Adonis app', () => {
     expect(router.match('/api/meta', 'GET')).not.toBeNull();
   });
 });
+
+describe('federated console commands fail closed', () => {
+  it('a web process with consoleCommands and no secret refuses to start, naming the option', async () => {
+    const app = await boot({
+      ...standalone(),
+      app: 'et',
+      consoleCommands: { prefix: 'et', actions: true },
+    } as ConfigConfig);
+    await expect(app.start(async () => {})).rejects.toThrow(/consoleCommands\.secret/);
+  });
+
+  it('a web console whose federated app may act needs controlPlane.secret', async () => {
+    const config = standalone({
+      federatedApps: { et: { store: { connection: 'et' }, controlPlane: { prefix: 'et' } } },
+    });
+    await expect(boot(config)).rejects.toThrow(/controlPlane\.secret/);
+  });
+});

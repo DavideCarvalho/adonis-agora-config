@@ -14,6 +14,7 @@ import { InvalidColumnFilterError, parseCursorParams } from '@adonis-agora/filte
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ConfigAdmin, EntryRow } from '../admin.js';
 import {
+  CONFIG_CONSOLE_CAPABILITIES,
   type CommandMeta,
   FederatedAppError,
   type FederatedConfigApp,
@@ -345,10 +346,12 @@ export class ConfigConsole {
   /** What a command to another app carries: the viewer (the actor) and what it was granted. */
   async #commandMeta(ctx: HttpContext): Promise<CommandMeta> {
     const actor = await this.#actor(ctx);
-    const capabilities = this.#capabilities.get(ctx);
+    // Always sent: the viewer's grant from `authorize`, or (when it does not narrow) every config
+    // console capability. The owning app refuses a command without them.
+    const capabilities = this.#capabilities.get(ctx) ?? [...CONFIG_CONSOLE_CAPABILITIES];
     return {
       actor: actor.id,
-      ...(capabilities !== undefined ? { capabilities } : {}),
+      capabilities,
       ...(this.options.config.appLabel !== undefined ? { via: this.options.config.appLabel } : {}),
     };
   }

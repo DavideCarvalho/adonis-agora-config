@@ -1,4 +1,4 @@
-import type { ConfigValue, VaultReference } from '@adonis-agora/config-core';
+import type { ConfigScope, ConfigValue, VaultReference } from '@adonis-agora/config-core';
 import type { ApplicationService } from '@adonisjs/core/types';
 import type { CryptoOptions, SecretCodec } from './crypto/secrets.js';
 import type { ConfigConsoleConfig } from './dashboard/define_config.js';
@@ -43,9 +43,20 @@ export const stores = {
   },
 };
 
-/** Resolves a `vault://provider/path#field` reference at read time. */
+/** Whose entry a vault reference is being resolved for. */
+export interface VaultContext {
+  /** The scope that holds the entry: a resolver must only read paths that app may read. */
+  scope: ConfigScope;
+}
+
+/**
+ * Resolves a `vault://provider/path#field` reference at read time. `context.scope` is the scope the
+ * entry belongs to: the resolver answers with this server's credentials, so it is the resolver's
+ * (or {@link VaultConfig.allow}'s) job to refuse a path that app should not reach.
+ */
 export type VaultResolver = (
   reference: VaultReference,
+  context: VaultContext,
 ) => ConfigValue | undefined | Promise<ConfigValue | undefined>;
 
 export interface VaultConfig {
@@ -55,6 +66,25 @@ export interface VaultConfig {
    * resolved is served masked and logged, never as a wrong value.
    */
   resolve: VaultResolver;
+  /**
+   * Whether `scope` may use `reference`. Checked before every resolution (console, MCP, control
+   * plane). Without it any writer of any app can point an entry at any path this server's vault
+   * credentials reach — set it whenever apps must not read each other's secrets:
+   * `allow: (ref, scope) => ref.path.startsWith(`${scope.app}/`)`.
+   */
+  allow?: (reference: VaultReference, scope: ConfigScope) => boolean;
+}
+
+/** {@link VaultConfig} as one resolver: `allow` first, then `resolve` (a refused path stays masked). */
+export function scopedVaultResolver(config: VaultConfig): VaultResolver {
+  return async (reference, context) => {
+    if (config.allow && !config.allow(reference, context.scope)) {
+      throw new Error(
+        `vault reference vault://${reference.provider}/${reference.path} is not allowed for ${context.scope.app}`,
+      );
+    }
+    return config.resolve(reference, context);
+  };
 }
 
 /** The environment this process belongs to. Default: `production` on a control plane, `NODE_ENV` on a tenant. */
@@ -169,6 +199,13 @@ export interface ConfigConsoleCommandsConfig {
   reveal?: boolean;
   /** The partitions the other console may touch. Default: this app's own (`app`), else any. */
   partitions?: string[];
+  /**
+   * The secret this app and the other console share (the console's
+   * `federatedApps.<app>.controlPlane.secret`), at least 16 characters. Every command and answer
+   * carries an HMAC under it, commands older than a minute are refused and each one runs at most
+   * once. Required: without it the web process refuses to boot.
+   */
+  secret?: string | { release(): string };
 }
 
 /** An app that reads its configuration from a control plane. */

@@ -302,16 +302,61 @@ describe('tenant transports', () => {
     timeout: 30_000,
   }, async () => {
     const redis = new FakeRedis();
-    const { base, admin } = await setup(transports.redis({ client: redis as never }));
+    const secret = 'snapshot-secret-0123456789';
+    const { base, admin } = await setup(transports.redis({ client: redis as never, secret }));
     const scope = { app: 'shop', environment: 'production', label: 'main' };
     await admin.setEntry(scope, 'db.host', { value: 'db-1' }, { actor: 't' });
 
     const tenant = await boot(
-      tenantConfig('http://127.0.0.1:1/_config', transports.redis({ client: redis as never })),
+      tenantConfig(
+        'http://127.0.0.1:1/_config',
+        transports.redis({ client: redis as never, secret }),
+      ),
     );
     const runtime = await tenantRuntime(tenant);
     await waitFor('broker snapshot boot', () => runtime.get('db.host') === 'db-1');
     expect(runtime.status().source).toBe('snapshot');
     void base;
+  });
+
+  it('never serves a snapshot that is unsigned, forged, or signed for another scope', async () => {
+    const redis = new FakeRedis();
+    const secret = 'snapshot-secret-0123456789';
+    const ctx = {} as never;
+    const plane = await transports.redis({ client: redis as never, secret })(ctx);
+    const tenant = await transports.redis({ client: redis as never, secret })(ctx);
+    const unsigned = await transports.redis({ client: redis as never })(ctx);
+    const shop = { app: 'shop', environment: 'production', label: 'main' };
+    const other = { app: 'other', environment: 'production', label: 'main' };
+    const view = {
+      ...shop,
+      version: 3,
+      fingerprint: 'f',
+      entries: { 'db.host': { value: 'db-1', secret: false, reloadable: false, masked: false } },
+      createdAt: new Date(0).toISOString(),
+      createdBy: 't',
+    } as never;
+
+    await plane.publish?.(shop, 3, view);
+    expect((await tenant.snapshot?.(shop))?.version).toBe(3);
+    // Without the secret a tenant never boots from a snapshot at all.
+    expect(await unsigned.snapshot?.(shop)).toBeNull();
+
+    // Someone with Redis write access swaps in their own configuration.
+    const key = [...redis.values.keys()].find((k) => k.includes(':shop:'))!;
+    const stored = JSON.parse(redis.values.get(key)!);
+    stored.snapshot.entries['db.host'].value = 'attacker.example';
+    redis.values.set(key, JSON.stringify(stored));
+    expect(await tenant.snapshot?.(shop)).toBeNull();
+
+    // A plain (unsigned, pre-upgrade style) snapshot is refused too.
+    redis.values.set(key, JSON.stringify(view));
+    expect(await tenant.snapshot?.(shop)).toBeNull();
+
+    // A valid snapshot of one scope copied onto another's key does not verify there.
+    await plane.publish?.(shop, 4, view);
+    const otherKey = key.replace(':shop:', ':other:');
+    redis.values.set(otherKey, redis.values.get(key)!);
+    expect(await tenant.snapshot?.(other)).toBeNull();
   });
 });

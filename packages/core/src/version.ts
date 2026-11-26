@@ -1,12 +1,26 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from './json.js';
-import type { ConfigEntryState } from './types.js';
+import type { ConfigEntryState, ConfigValue } from './types.js';
+
+export interface FingerprintOptions {
+  /**
+   * A keyed digest of a secret's plaintext (an HMAC under a key only the server holds). The
+   * fingerprint is shown to callers that cannot read secrets, so an unkeyed hash of a secret would
+   * let them confirm guesses offline; with this, a secret enters the fingerprint only through the
+   * keyed digest. Without it the plaintext is hashed as before (no secret store: nothing to guess).
+   */
+  secretDigest?: ((value: ConfigValue) => string) | undefined;
+}
 
 /**
  * A short content hash of the entries (and their flags): two versions with the same fingerprint hold
- * the same configuration. Used as the ETag's second half and to recognise a no-op write.
+ * the same configuration. Used to recognise a no-op write and to signal changes to tenants.
  */
-export function fingerprintOf(entries: Record<string, ConfigEntryState>): string {
+export function fingerprintOf(
+  entries: Record<string, ConfigEntryState>,
+  options: FingerprintOptions = {},
+): string {
+  const { secretDigest } = options;
   const canonical = canonicalJson(
     Object.fromEntries(
       Object.entries(entries)
@@ -14,7 +28,13 @@ export function fingerprintOf(entries: Record<string, ConfigEntryState>): string
         .map(([key, entry]) => [
           key,
           {
-            value: entry.value ?? null,
+            value:
+              secretDigest !== undefined &&
+              entry.secret &&
+              entry.value !== undefined &&
+              entry.sealedTo === undefined
+                ? { digest: secretDigest(entry.value) }
+                : (entry.value ?? null),
             vault: entry.vault ?? null,
             sealedTo: entry.sealedTo ?? null,
             secret: entry.secret,
@@ -27,9 +47,14 @@ export function fingerprintOf(entries: Record<string, ConfigEntryState>): string
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
-/** The ETag of a scope version: strong, and different for two scopes with the same number. */
+/**
+ * The ETag of a scope version: strong, and different for two scopes with the same number. Each part
+ * is percent-encoded, so the header is always plain ASCII whatever the label holds (a control or
+ * non-latin1 character in a response header makes Node throw after the handler returned).
+ */
 export function etagOf(app: string, environment: string, label: string, version: number): string {
-  return `"${app}:${environment}:${label}:${version}"`;
+  const part = (value: string) => encodeURIComponent(value);
+  return `"${part(app)}:${part(environment)}:${part(label)}:${version}"`;
 }
 
 /** Whether an `if-none-match` header matches `etag` (comma-separated list, `W/` prefixes). */

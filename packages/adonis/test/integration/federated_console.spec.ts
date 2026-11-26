@@ -79,6 +79,9 @@ function router(routes: Array<{ method: string; pattern: string; handler: Handle
   return { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') };
 }
 
+/** The secret the Hub and Entre Textos share for console commands. */
+const CHANNEL_SECRET = 'hub-et-shared-secret-0123456789';
+
 interface Setup {
   /** Entre Textos' consoleCommands. */
   owner?: { actions?: boolean; reveal?: boolean; instances?: number; listening?: boolean };
@@ -108,7 +111,11 @@ async function setup(options: Setup = {}) {
   const owner = options.owner ?? {};
   if (owner.listening !== false) {
     for (let i = 0; i < (owner.instances ?? 2); i++) {
-      const channel = new RedisConsoleChannel({ client: bus.connection(), prefix: PREFIX });
+      const channel = new RedisConsoleChannel({
+        client: bus.connection(),
+        prefix: PREFIX,
+        secret: CHANNEL_SECRET,
+      });
       const handler = configConsoleCommandHandler({
         admin: etAdmin,
         prefix: PREFIX,
@@ -140,7 +147,7 @@ async function setup(options: Setup = {}) {
         label: 'Entre Textos',
         partition: ET.app,
         store: { connection: 'et' },
-        controlPlane: { prefix: PREFIX },
+        controlPlane: { prefix: PREFIX, secret: CHANNEL_SECRET },
         timeoutMs: 500,
         ...(options.entry ?? {}),
       },

@@ -8,6 +8,7 @@ import {
   type EncrypterLike,
   keyringCodec,
   type SecretCodec,
+  withFingerprintKey,
 } from '../src/crypto/secrets.js';
 import { ConfigConsole } from '../src/dashboard/console.js';
 import {
@@ -29,6 +30,7 @@ import {
   type FactoryContext,
   resolveStandaloneApp,
   type StandaloneConfig,
+  scopedVaultResolver,
   stores,
   type TenantTopologyConfig,
 } from '../src/define_config.js';
@@ -317,7 +319,7 @@ export default class ConfigProvider {
         environment,
         ...(config.prefix ? { prefix: config.prefix } : {}),
         ...(config.corsOrigins ? { corsOrigins: config.corsOrigins } : {}),
-        ...(config.vault ? { vault: config.vault.resolve } : {}),
+        ...(config.vault ? { vault: scopedVaultResolver(config.vault) } : {}),
         ...(transport ? { transport } : {}),
         logger,
       });
@@ -325,7 +327,7 @@ export default class ConfigProvider {
     const admin = new ConfigAdmin({
       store,
       canRevealSecrets: consoleConfig.revealSecrets,
-      ...(config.vault ? { vault: config.vault.resolve } : {}),
+      ...(config.vault ? { vault: scopedVaultResolver(config.vault) } : {}),
       ...(transport ? { transport } : {}),
       // Every write (console, MCP, command) reaches the streams of this process immediately; another
       // replica catches up on the stream's own 15s version poll.
@@ -366,6 +368,22 @@ export default class ConfigProvider {
    * key there is no codec: writing a secret fails loudly.
    */
   async #secretCodec(crypto: CryptoOptions | undefined): Promise<SecretCodec | undefined> {
+    const codec = await this.#keyringCodec(crypto);
+    if (!codec) return undefined;
+    // Fingerprints hash secrets through an HMAC keyed by the app key (or the first `crypto.keys`
+    // key), never as a bare hash a reader without the secret could confirm guesses against.
+    const first = crypto?.keys?.[0];
+    const secret =
+      this.#appKey() ??
+      (first === undefined
+        ? undefined
+        : typeof first === 'object' && first !== null && 'secret' in first
+          ? first.secret
+          : first);
+    return secret === undefined ? codec : withFingerprintKey(codec, secret);
+  }
+
+  async #keyringCodec(crypto: CryptoOptions | undefined): Promise<SecretCodec | undefined> {
     try {
       if (crypto?.keys?.length || crypto?.encryption) {
         return keyringCodec(
@@ -481,8 +499,11 @@ export default class ConfigProvider {
     const environment = this.#runtime?.environment ?? 'production';
     if (config.federatedApps) {
       const redisConnections = redisConnectionsOf(this.app.config);
+      // Web only (where commands are sent): an entry that may act must carry the shared secret,
+      // or the boot fails here naming the line to add. Ace commands send none, so never fail them.
+      const requireSecret = this.app.getEnvironment() === 'web';
       for (const [key, entry] of Object.entries(config.federatedApps)) {
-        validateFederatedConfigApp(key, entry, redisConnections);
+        validateFederatedConfigApp(key, entry, redisConnections, { requireSecret });
       }
       const container = this.app.container;
       this.#federated = new FederatedConfigApps(config.federatedApps, {
@@ -618,6 +639,13 @@ export default class ConfigProvider {
     const logger = await this.#logger();
     const admin = this.#admin;
     if (!admin) return;
+    // Fail closed: commands are only taken over a channel authenticated with a shared secret.
+    const secret = consoleCommandsSecret(options.secret);
+    if (secret === undefined) {
+      throw new Error(
+        "[@adonis-agora/config] consoleCommands needs `consoleCommands.secret` in config/config.ts (at least 16 characters, the same value as the console's `federatedApps.<app>.controlPlane.secret`), so commands from another console are authenticated. Remove `consoleCommands` if no other console manages this app.",
+      );
+    }
     try {
       const appKey = this.#appKey();
       if (!appKey && (options.actions || options.reveal)) {
@@ -630,6 +658,7 @@ export default class ConfigProvider {
       const channel = new RedisConsoleChannel({
         client: await resolveRedisConnection(this.app.container, options.connection),
         prefix: options.prefix,
+        secret,
       });
       await channel.answer(
         configConsoleCommandHandler({
@@ -684,4 +713,18 @@ export default class ConfigProvider {
     this.#console = undefined;
     this.#consoleConfig = undefined;
   }
+}
+
+/** `consoleCommands.secret` when it is usable (at least 16 characters), else `undefined`. */
+function consoleCommandsSecret(
+  secret: string | { release(): string } | undefined,
+): string | { release(): string } | undefined {
+  if (secret === undefined || secret === null) return undefined;
+  let raw: unknown;
+  try {
+    raw = typeof secret === 'string' ? secret : secret.release();
+  } catch {
+    return undefined;
+  }
+  return typeof raw === 'string' && raw.length >= 16 ? secret : undefined;
 }

@@ -24,6 +24,7 @@ import { type ConfigStore, redactEntry } from '../store/store.js';
 import {
   APP_UNREACHABLE,
   type ConsoleCommand,
+  type ConsoleSecret,
   RedisConsoleChannel,
   type RedisLike,
 } from './redis_channel.js';
@@ -52,9 +53,13 @@ export interface FederatedConfigAppConfig {
   store: { connection?: string | undefined; schema?: string | undefined } | ConfigStore;
   /**
    * Where that app answers (its `consoleCommands` in its config/config.ts): the `@adonisjs/redis`
-   * connection to publish on and the app's `prefix`.
+   * connection to publish on, the app's `prefix`, and the `secret` it shares with that app (its
+   * `consoleCommands.secret`, at least 16 characters). Every command and answer carries an HMAC
+   * under it; an entry that may act (`actions` not `false`) needs it.
    */
-  controlPlane: { connection?: string | undefined; prefix: string } | RedisConsoleChannel;
+  controlPlane:
+    | { connection?: string | undefined; prefix: string; secret?: ConsoleSecret | undefined }
+    | RedisConsoleChannel;
   /**
    * Send writes (set, unset, rollback) and reveals to that app. Default `true`; `false` makes it
    * read-only from here. The app decides too: its `consoleCommands.actions` / `.reveal`.
@@ -92,6 +97,7 @@ export function validateFederatedConfigApp(
   key: string,
   entry: FederatedConfigAppConfig,
   redisConnections: { names: string[]; default: string | undefined } | undefined,
+  options: { requireSecret?: boolean } = {},
 ): void {
   const fail = (message: string): never => {
     throw new Error(`[@adonis-agora/config] console.federatedApps["${key}"]: ${message}`);
@@ -107,6 +113,27 @@ export function validateFederatedConfigApp(
     fail('`partition` must be a non-empty string');
   }
   const plane = entry.controlPlane;
+  // Commands (writes, reveals) are only sent over an authenticated channel: an entry that may act
+  // needs the secret it shares with that app, or the boot fails here naming the line to add.
+  if (options.requireSecret && entry?.actions !== false) {
+    if (plane instanceof RedisConsoleChannel) {
+      if (!plane.authenticated) {
+        fail('the RedisConsoleChannel passed as `controlPlane` needs a `secret`');
+      }
+    } else if (plane && typeof plane === 'object') {
+      const raw =
+        typeof plane.secret === 'string'
+          ? plane.secret
+          : typeof plane.secret?.release === 'function'
+            ? plane.secret.release()
+            : undefined;
+      if (typeof raw !== 'string' || raw.length < 16) {
+        fail(
+          "`controlPlane.secret` is required (at least 16 characters, the same value as that app's `consoleCommands.secret`), or set `actions: false` to keep this app read-only here",
+        );
+      }
+    }
+  }
   if (!(plane instanceof RedisConsoleChannel)) {
     if (!plane || typeof plane !== 'object') {
       fail('`controlPlane` is required ({ connection, prefix })');
@@ -312,12 +339,25 @@ export function configConsoleCommandHandler(
     }
     return scope;
   };
+  /**
+   * Refuses unless the console's viewer was granted `capability`. The console always sends the
+   * viewer's capabilities; a command without them is refused.
+   */
+  const demand = (command: ConsoleCommand, capability: string): void => {
+    if (!Array.isArray(command.capabilities)) {
+      throw new CommandError('config: the console sent no viewer capabilities', 403);
+    }
+    if (!capabilityAllows(command.capabilities, capability)) {
+      throw new CommandError(`the viewer lacks ${capability}`, 403);
+    }
+  };
   return async (command) => {
     const { verb } = command;
     const actor =
       typeof command.actor === 'string' && command.actor !== '' ? command.actor : 'console';
     const via = typeof command.via === 'string' && command.via !== '' ? ` via ${command.via}` : '';
     if (verb === WRITE_KEY_VERB) {
+      demand(command, CONFIG_SCOPES.write);
       if (!options.actions || !options.keys) return null;
       return options.keys.publicKey;
     }
@@ -328,9 +368,7 @@ export function configConsoleCommandHandler(
           403,
         );
       }
-      if (!capabilityAllows(command.capabilities ?? [], CONFIG_SCOPES.secretsRead)) {
-        throw new CommandError(`the viewer lacks ${CONFIG_SCOPES.secretsRead}`, 403);
-      }
+      demand(command, CONFIG_SCOPES.secretsRead);
       const body = (command.args[0] ?? {}) as Record<string, unknown>;
       const scope = scopeOf(body.scope);
       const key = text(body.key, 'key');
@@ -375,6 +413,7 @@ export function configConsoleCommandHandler(
         403,
       );
     }
+    demand(command, CONFIG_SCOPES.write);
     const body = (command.args[0] ?? {}) as Record<string, unknown>;
     const scope = scopeOf(body.scope);
     if (verb === 'rollback') {
@@ -449,10 +488,21 @@ export function configConsoleCommandHandler(
 /** How long the console keeps an app's write key before asking again. */
 const WRITE_KEY_TTL_MS = 10 * 60_000;
 
+/**
+ * What the console's viewer may do on another app when its `authorize` does not narrow it: every
+ * config console capability. The owning app still decides (`actions`, `reveal`).
+ */
+export const CONFIG_CONSOLE_CAPABILITIES: readonly string[] = [
+  CONFIG_SCOPES.read,
+  CONFIG_SCOPES.write,
+  CONFIG_SCOPES.secretsRead,
+];
+
 /** What the console sends with a command, besides its arguments. */
 export interface CommandMeta {
   actor: string;
-  capabilities?: string[] | undefined;
+  /** The viewer's capabilities (always sent: the owning app refuses a command without them). */
+  capabilities: string[];
   via?: string | undefined;
 }
 
@@ -505,7 +555,7 @@ export class FederatedConfigApp {
           verb,
           args,
           actor: meta.actor,
-          ...(meta.capabilities !== undefined ? { capabilities: meta.capabilities } : {}),
+          capabilities: meta.capabilities,
           ...(meta.via !== undefined ? { via: meta.via } : {}),
         },
         this.timeoutMs !== undefined ? { timeoutMs: this.timeoutMs } : {},
@@ -681,6 +731,9 @@ export async function buildFederatedConfigApp(
       : new RedisConsoleChannel({
           client: await deps.redis(config.controlPlane.connection),
           prefix: config.controlPlane.prefix,
+          ...(config.controlPlane.secret !== undefined
+            ? { secret: config.controlPlane.secret }
+            : {}),
         });
   return new FederatedConfigApp({
     id,

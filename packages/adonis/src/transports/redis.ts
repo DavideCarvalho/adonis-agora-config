@@ -1,5 +1,9 @@
-import { randomUUID } from 'node:crypto';
-import type { ConfigDocumentView, ConfigScope } from '@adonis-agora/config-core';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import {
+  type ConfigDocumentView,
+  type ConfigScope,
+  canonicalJson,
+} from '@adonis-agora/config-core';
 import { describeStackUse } from '../stack.js';
 import type { ConfigTransport, ConfigTransportFactory } from './types.js';
 
@@ -28,6 +32,31 @@ export interface RedisTransportConfig {
   snapshotTtlSeconds?: number;
   /** A raw ioredis client (or a test double); takes precedence over `connection`. */
   client?: RedisClient;
+  /**
+   * A secret the control plane and its tenants share (at least 16 characters). The control plane
+   * signs each snapshot with it, and a tenant only boots from a snapshot whose signature checks out.
+   * Without it a tenant never boots from a snapshot (the fallback when the control plane is down):
+   * anyone who can write to Redis could otherwise hand it a configuration.
+   */
+  secret?: string | { release(): string };
+}
+
+/** HMAC over a snapshot and the scope it is for (so one scope's snapshot cannot serve another). */
+function snapshotMac(key: Buffer, scope: ConfigScope, snapshot: unknown): string {
+  return createHmac('sha256', key)
+    .update(
+      `config:snapshot\n${canonicalJson([scope.app, scope.environment, scope.label, snapshot] as never)}`,
+    )
+    .digest('base64url');
+}
+
+function snapshotKeyOf(secret: RedisTransportConfig['secret']): Buffer | undefined {
+  if (secret === undefined) return undefined;
+  const raw = typeof secret === 'string' ? secret : secret.release();
+  if (typeof raw !== 'string' || raw.length < 16) {
+    throw new Error('config: transports.redis `secret` must be at least 16 characters');
+  }
+  return createHmac('sha256', raw).update('agora:config:redis-snapshot').digest();
 }
 
 const encode = (part: string) => encodeURIComponent(part);
@@ -66,11 +95,17 @@ export function redisTransport(config: RedisTransportConfig = {}): ConfigTranspo
     const prefix = config.prefix ?? 'config';
     const ttl = config.snapshotTtlSeconds ?? 86_400;
     const client = await resolveRedis(ctx, config);
+    const key = snapshotKeyOf(config.secret);
 
     const transport: ConfigTransport = {
       kind: 'redis',
       async publish(scope, version, snapshot) {
-        await client.set(snapshotKey(prefix, scope), JSON.stringify(snapshot), 'EX', ttl);
+        // Signed when there is a secret; an unsigned one is still written (older tenants read it),
+        // but a tenant of this version only boots from a signed one.
+        const stored = key
+          ? { signed: 1, snapshot, mac: snapshotMac(key, scope, snapshot) }
+          : snapshot;
+        await client.set(snapshotKey(prefix, scope), JSON.stringify(stored), 'EX', ttl);
         await client.publish(
           changedChannel(prefix, scope),
           JSON.stringify({
@@ -112,11 +147,18 @@ export function redisTransport(config: RedisTransportConfig = {}): ConfigTranspo
         return () => {};
       },
       async snapshot(scope) {
+        if (!key) return null;
         const raw = await client.get(snapshotKey(prefix, scope));
         if (typeof raw !== 'string') return null;
         try {
-          const parsed = JSON.parse(raw) as ConfigDocumentView;
-          return parsed && typeof parsed === 'object' ? parsed : null;
+          const parsed = JSON.parse(raw) as { signed?: unknown; snapshot?: unknown; mac?: unknown };
+          if (parsed?.signed !== 1 || typeof parsed.mac !== 'string') return null;
+          const snapshot = parsed.snapshot as ConfigDocumentView;
+          if (!snapshot || typeof snapshot !== 'object') return null;
+          const expected = Buffer.from(snapshotMac(key, scope, snapshot));
+          const actual = Buffer.from(parsed.mac);
+          if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+          return snapshot;
         } catch {
           return null;
         }
