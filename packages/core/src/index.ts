@@ -3,11 +3,13 @@ export { diffDocuments, diffSummary } from './diff.js';
 export { canonicalJson, documentValues, flattenObject, unflattenObject } from './json.js';
 export {
   assertConfigKey,
+  assertScopeName,
   cloneEntries,
   coerceEnvValue,
   envNameOf,
   envValueOf,
   isReservedKeySegment,
+  isValidScopeName,
   isVaultReference,
   keyFromEnvName,
   parseConfigValue,
@@ -35,7 +37,7 @@ export type {
   OffsetPage,
   ScopeSummary,
 } from './types.js';
-export { etagMatches, etagOf, fingerprintOf } from './version.js';
+export { etagMatches, etagOf, type FingerprintOptions, fingerprintOf } from './version.js';
 
 /**
  * The scopes a tenant token may carry. The product resource is `urn:agora:config`. Check them with

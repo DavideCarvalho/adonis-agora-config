@@ -99,6 +99,29 @@ describe.each(stores)('timestamps in %s', (_name, open) => {
     expect(page.document).toBeNull();
   });
 
+  it("removes every key of one owner, and only that owner's", async () => {
+    const store = await open();
+    const register = (app: string) => {
+      const pair = generateKeyPair('x25519');
+      return store.registerTenantKey!({
+        app,
+        kid: pair.publicKey.kid,
+        publicKey: pair.publicKey,
+        active: true,
+        createdAt: T1,
+        createdBy: 'test',
+      });
+    };
+    await register('@console-commands:shop');
+    await register('@console-commands:shop');
+    await register('shop');
+    expect(await store.removeTenantKeys!('@console-commands:shop')).toEqual({ removed: 2 });
+    expect(await store.listTenantKeys!('@console-commands:shop')).toEqual([]);
+    expect(await store.listTenantKeys!('shop')).toHaveLength(1);
+    // Idempotent.
+    expect(await store.removeTenantKeys!('@console-commands:shop')).toEqual({ removed: 0 });
+  });
+
   it('stamps tenant keys: updatedAt moves when one is activated or retired', async () => {
     const store = (await open()) as ConfigStore & { tick?: (to: string) => void };
     const first = generateKeyPair('x25519');

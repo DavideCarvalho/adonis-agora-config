@@ -320,7 +320,8 @@ export class TenantClient {
     if (this.#started) return;
     this.#started = true;
     this.#stopped = false;
-    await this.load();
+    // Already loaded once (the bootstrap phase, or `load()`): only the watching starts here.
+    if (this.#boot === null) await this.load();
     const streaming = this.options.stream !== false;
     const interval = this.options.intervalMs ?? (streaming ? 30_000 : 5_000);
     this.#timer = setInterval(() => void this.refresh(), interval);

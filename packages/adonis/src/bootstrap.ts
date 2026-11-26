@@ -42,7 +42,9 @@ export interface BootstrapResult {
  */
 export async function bootstrapConfig(options: BootstrapOptions): Promise<BootstrapResult> {
   const client = createTenantClient({ ...options, env: options.env ?? true });
-  await client.start();
+  // Load once: the provider starts the stream and the polling, and only in a process that serves
+  // (`web`, or `tenant.watch: true`), so `node ace` commands that import this still exit.
+  await client.load();
   setTenantBootstrap(tenantBootstrapKey(options), client);
   const status = client.status();
   return {

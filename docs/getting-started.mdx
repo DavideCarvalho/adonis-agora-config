@@ -109,9 +109,12 @@ export default await Env.create(new URL('../', import.meta.url), {
 - **The server down:** the last snapshot is used (`tmp/config/snapshot.json`, `snapshotPath` to
   move it, `false` for none). Without one, the app boots on its local environment and a warning
   is printed. The boot never fails because of the config server.
-- **Commands:** `node ace` loads `start/env.ts` too, so commands get the same values.
+- **Commands:** `node ace` loads `start/env.ts` too, so commands get the same values. They are
+  fetched once: no stream is opened, so a command exits when it is done.
 
-The provider reuses the client opened here, so the document is not fetched twice.
+The provider reuses the client opened here, so the document is not fetched twice, and keeps it
+fresh (the stream, plus polling) only in a process that serves: `web`, or one with
+`tenant.watch: true`.
 
 `bootstrapConfig()`, which needs explicit `url`, `partition` and `token`, still works at the top
 of `bin/server.ts`. Use it when you do not want the `.env` precedence.

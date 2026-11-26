@@ -119,6 +119,8 @@ export interface Meta {
   /** Whether the viewer may read secret values (the entry is otherwise masked). */
   canRevealSecrets: boolean;
   topology: 'standalone' | 'control-plane' | 'tenant';
+  /** Set when the console's `authorize` narrowed this viewer: what it may do. */
+  viewer?: { capabilities: string[]; canWrite: boolean };
 }
 
 export interface EntryInput {

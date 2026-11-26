@@ -7,6 +7,7 @@ import {
   type ConfigScope,
   type ConfigSealedTo,
   type ConfigValue,
+  type FingerprintOptions,
   fingerprintOf,
   isVaultReference,
 } from '@adonis-agora/config-core';
@@ -57,6 +58,11 @@ export interface ConfigStore {
   setup?(): Promise<void> | void;
   /** The current version of a scope, or null when nothing was ever written. */
   read(scope: ConfigScope): Promise<ConfigDocument | null>;
+  /**
+   * The latest version number of a scope (0 when empty), without reading or decrypting the entries.
+   * Optional: the control plane uses it to answer a conditional GET with `304` cheaply.
+   */
+  latestVersion?(scope: ConfigScope): Promise<number>;
   /** One past version. */
   readVersion(scope: ConfigScope, version: number): Promise<ConfigDocument | null>;
   /** Versions of a scope, newest first. */
@@ -111,6 +117,8 @@ export interface ConfigStore {
   listTenantKeys?(app: string): Promise<TenantPublicKey[]>;
   /** Registers (or re-activates) one of an app's public keys. */
   registerTenantKey?(key: TenantPublicKey): Promise<{ created: boolean }>;
+  /** Removes every public key registered under `app` (an owner that no longer publishes one). */
+  removeTenantKeys?(app: string): Promise<{ removed: number }>;
   /** How the stored secrets stand against the active key (doctor). */
   cryptoStatus?(): Promise<CryptoStatusCounts>;
   /** Re-seals values written with a retired/legacy key with the active one (the reseal command). */
@@ -232,6 +240,29 @@ export class DocumentSealer {
     return this.codec;
   }
 
+  /**
+   * The fingerprint as callers see it: the stored one passed through the codec's keyed digest.
+   * Versions written before fingerprints were keyed stored a bare hash of their secrets; this way no
+   * stored fingerprint (old or new) ever leaves the store as-is. Deterministic, so two versions with
+   * the same stored fingerprint still compare equal. Without a keyed codec it is the stored value.
+   */
+  publicFingerprint(stored: string): string {
+    const digest = this.codec?.digest;
+    if (!digest || stored === '') return stored;
+    return digest.call(this.codec, `fingerprint:${stored}`).slice(0, 16);
+  }
+
+  /** `document` with its {@link publicFingerprint}: what a write or a rollback hands back. */
+  withPublicFingerprint<T extends { fingerprint: string }>(document: T): T {
+    return { ...document, fingerprint: this.publicFingerprint(document.fingerprint) };
+  }
+
+  /** How this store fingerprints a document: secrets through the codec's keyed digest. */
+  get fingerprintOptions(): FingerprintOptions {
+    const digest = this.codec?.digest;
+    return digest ? { secretDigest: (value) => digest.call(this.codec, value) } : {};
+  }
+
   async sealEntry(entry: ConfigEntryState, aad: string): Promise<ConfigEntryState> {
     if (this.mode === 'redact') {
       throw new Error("@adonis-agora/config: this store only reads another app's configuration");
@@ -289,7 +320,11 @@ export class DocumentSealer {
         await this.openEntry(entry, entryAad(document, key)),
       ]),
     );
-    return { ...document, entries: Object.fromEntries(entries) };
+    return {
+      ...document,
+      entries: Object.fromEntries(entries),
+      fingerprint: this.publicFingerprint(document.fingerprint),
+    };
   }
 
   async sealAudit(record: ConfigAuditRecord): Promise<ConfigAuditRecord> {
@@ -382,6 +417,7 @@ export function applyChanges(
   current: ConfigDocument | null,
   changes: readonly ConfigEntryInput[],
   context: WriteContext,
+  options: FingerprintOptions = {},
 ): { document: ConfigDocument; changed: boolean; touched: TouchedEntry[] } {
   const entries: Record<string, ConfigEntryState> = { ...(current?.entries ?? {}) };
   const touched: TouchedEntry[] = [];
@@ -427,11 +463,13 @@ export function applyChanges(
     touched.push({ key: input.key, ...(existing ? { before: existing } : {}), after: next });
   }
 
-  const fingerprint = fingerprintOf(entries);
+  const fingerprint = fingerprintOf(entries, options);
+  // The current version is fingerprinted again with the same options (rather than trusting its
+  // stored fingerprint), so a change in how fingerprints are computed never reads as a change.
   const changed =
     current === null
       ? Object.keys(entries).length > 0
-      : fingerprint !== current.fingerprint ||
+      : fingerprint !== fingerprintOf(current.entries, options) ||
         Object.keys(entries).length !== Object.keys(current.entries).length;
   const document: ConfigDocument = {
     app: current?.app ?? '',

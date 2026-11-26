@@ -91,9 +91,11 @@ export {
   type Factory,
   type FactoryContext,
   type StandaloneConfig,
+  scopedVaultResolver,
   stores,
   type TenantTopologyConfig,
   type VaultConfig,
+  type VaultContext,
   type VaultResolver,
 } from './define_config.js';
 export { configDevTools, registerConfigDevTools } from './dev_tools.js';

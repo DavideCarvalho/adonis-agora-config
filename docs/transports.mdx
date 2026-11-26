@@ -21,7 +21,7 @@ and polling as a fallback. That is the behavior of every previous version.
 | Driver | Watch | On-demand read | Peer (loaded lazily) |
 | --- | --- | --- | --- |
 | `transports.http({ url?, fetch?, timeoutMs? })` (default) | SSE + poll | `GET /v1/config` | none |
-| `transports.redis({ connection?, prefix?, snapshotTtlSeconds? })` | pub/sub `changed v=N` + masked snapshot key | `GET /v1/config` | `@adonisjs/redis` |
+| `transports.redis({ connection?, prefix?, snapshotTtlSeconds?, secret? })` | pub/sub `changed v=N` + masked snapshot key | `GET /v1/config` | `@adonisjs/redis` |
 | `transports.durable({ controlPlane, from? })` | durable `ControlPlane` event | `GET /v1/config` | `@adonis-agora/durable` (the instance you pass) |
 
 ## HTTP (default)
@@ -55,7 +55,11 @@ import { defineConfig, transports } from '@adonis-agora/config'
 export default defineConfig({
   topology: 'control-plane',
   verifyTenant,
-  transport: transports.redis({ connection: 'main', prefix: 'config' }),
+  transport: transports.redis({
+    connection: 'main',
+    prefix: 'config',
+    secret: env.get('CONFIG_SNAPSHOT_SECRET'),
+  }),
 })
 ```
 
@@ -68,10 +72,18 @@ export default defineConfig({
     url: env.get('CONFIG_URL'),
     partition: 'streaming',
     token: env.get('CONFIG_TOKEN'),
-    transport: transports.redis({ connection: 'main', prefix: 'config' }),
+    transport: transports.redis({
+      connection: 'main',
+      prefix: 'config',
+      secret: env.get('CONFIG_SNAPSHOT_SECRET'),
+    }),
   },
 })
 ```
+
+`secret` (the same on both sides, 16+ characters) signs the snapshot a tenant boots from when the
+control plane is down. A tenant only uses a snapshot whose signature checks out; without `secret` it
+never boots from one, since anyone who can write to Redis could otherwise hand it a configuration.
 
 `connection` is a `@adonisjs/redis` connection name (`config/redis.ts`); omit it for `main`. The
 channel/key contain the app, environment and label, so two scopes never collide. The snapshot key is

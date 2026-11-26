@@ -37,6 +37,7 @@ afterEach(async () => {
 const SECRET = 'sk_live_do-not-leak-4242';
 const ET = { app: 'entre-textos', environment: 'production', label: 'main' };
 const PREFIX = 'entretextos';
+const CHANNEL_SECRET = 'federation-secret-0123456789';
 const APP_KEY = 'entre-textos-app-key-0123456789';
 
 async function sqlite(): Promise<SqlDatabase> {
@@ -83,7 +84,7 @@ interface Setup {
   /** Entre Textos' consoleCommands. */
   owner?: { actions?: boolean; reveal?: boolean; instances?: number; listening?: boolean };
   /** What the Hub's authorize grants (`x-viewer` header picks the viewer). */
-  grant?: { apps?: string[]; capabilities?: string[] };
+  grant?: { apps?: string[]; capabilities?: string[]; access?: 'read' | 'write' };
   /** The Hub's federatedApps entry. */
   entry?: { actions?: boolean };
 }
@@ -108,7 +109,11 @@ async function setup(options: Setup = {}) {
   const owner = options.owner ?? {};
   if (owner.listening !== false) {
     for (let i = 0; i < (owner.instances ?? 2); i++) {
-      const channel = new RedisConsoleChannel({ client: bus.connection(), prefix: PREFIX });
+      const channel = new RedisConsoleChannel({
+        client: bus.connection(),
+        prefix: PREFIX,
+        secret: CHANNEL_SECRET,
+      });
       const handler = configConsoleCommandHandler({
         admin: etAdmin,
         prefix: PREFIX,
@@ -140,7 +145,7 @@ async function setup(options: Setup = {}) {
         label: 'Entre Textos',
         partition: ET.app,
         store: { connection: 'et' },
-        controlPlane: { prefix: PREFIX },
+        controlPlane: { prefix: PREFIX, secret: CHANNEL_SECRET },
         timeoutMs: 500,
         ...(options.entry ?? {}),
       },
@@ -338,5 +343,52 @@ describe('federated config console', () => {
     expect((await narrow.call('/apps')).body.apps).toEqual([]);
     expect((await narrow.call('/meta')).body.apps).toEqual(['eduliberta']);
     expect((await narrow.call('/entries?app=et')).status).toBe(403);
+  });
+
+  it("the viewer's capabilities restrict this console's own app too, and the UI learns them", async () => {
+    const local = '?app=eduliberta';
+    for (const grant of [{ capabilities: ['config:console:read'] }, { access: 'read' as const }]) {
+      const { call } = await setup({ grant });
+      const put = await call(`/entries/feature.y${local}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value: 1 }),
+      });
+      expect(put).toMatchObject({ status: 403, body: { error: 'the viewer lacks config:write' } });
+      expect(
+        (await call(`/entries/feature.x${local}`, { method: 'DELETE', body: '{}' })).status,
+      ).toBe(403);
+      expect(
+        (await call(`/rollback${local}`, { method: 'POST', body: JSON.stringify({ to: 1 }) }))
+          .status,
+      ).toBe(403);
+      const meta = await call('/meta');
+      expect(meta.body.viewer).toMatchObject({ canWrite: false });
+      if (grant.access === 'read') {
+        // access: 'read' keeps reads, secrets included.
+        expect(meta.body.canRevealSecrets).toBe(true);
+      } else {
+        expect(meta.body.canRevealSecrets).toBe(false);
+        const reveal = await call(`/entries/feature.x/reveal${local}`, {
+          method: 'POST',
+          body: '{}',
+        });
+        expect(reveal).toMatchObject({
+          status: 403,
+          body: { error: 'the viewer lacks config:secrets:read' },
+        });
+      }
+    }
+    // `config:console:*` allows everything; an authorize that says nothing keeps full access.
+    for (const grant of [{ capabilities: ['config:console:*'] }, {}]) {
+      const { call } = await setup({ grant });
+      const put = await call(`/entries/feature.y${local}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value: 1 }),
+      });
+      expect(put.status).toBe(200);
+      const meta = await call('/meta');
+      if ('capabilities' in grant) expect(meta.body.viewer).toMatchObject({ canWrite: true });
+      else expect(meta.body.viewer).toBeUndefined();
+    }
   });
 });

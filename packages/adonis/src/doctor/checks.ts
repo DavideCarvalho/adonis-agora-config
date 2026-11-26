@@ -9,6 +9,7 @@ import { createTenantClient } from '../topology/tenant_client.js';
 import { TenantUrl } from '../topology/tenant_url.js';
 import { resolveTenantToken } from '../topology/token.js';
 import type { AgoraDoctorCheck, AgoraDoctorResult } from './agora_doctor.js';
+import { consoleCommandsCheck, consoleCommandsKeyCheck } from './console_commands.js';
 
 const DOCS = 'https://davidecarvalho.github.io/agora/docs/config';
 
@@ -394,4 +395,6 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
       };
     },
   },
+  consoleCommandsCheck,
+  consoleCommandsKeyCheck,
 ];

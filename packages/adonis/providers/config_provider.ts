@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import type { HttpContext } from '@adonisjs/core/http';
 import type { ApplicationService } from '@adonisjs/core/types';
 import { ConfigAdmin } from '../src/admin.js';
+import { type AppKey, appKeyOf } from '../src/app_key.js';
 import { browserChannel, browserValues, changesBrowser } from '../src/browser.js';
 import {
   type CryptoOptions,
@@ -9,6 +10,7 @@ import {
   type EncrypterLike,
   keyringCodec,
   type SecretCodec,
+  withFingerprintKey,
 } from '../src/crypto/secrets.js';
 import { ConfigConsole } from '../src/dashboard/console.js';
 import {
@@ -30,6 +32,7 @@ import {
   type FactoryContext,
   resolveStandaloneApp,
   type StandaloneConfig,
+  scopedVaultResolver,
   stores,
   type TenantTopologyConfig,
 } from '../src/define_config.js';
@@ -38,15 +41,27 @@ import { emitConfig } from '../src/diagnostics.js';
 import { registerDoctorChecks } from '../src/doctor/agora_doctor.js';
 import { agoraDoctorChecks } from '../src/doctor/checks.js';
 import {
+  CONSOLE_KEY_PURPOSE,
   configConsoleCommandHandler,
   consoleCommandKeys,
+  consoleKeyOwner,
   FederatedConfigApps,
   validateFederatedConfigApp,
 } from '../src/federation/console.js';
 import {
+  type ConsoleSiblings,
+  consoleSiblingsOf,
+  ensureConsoleKey,
+  type ResolvedConsoleAuth,
+  resolveAppConsoleAuth,
+  resolveFederatedAppAuth,
+} from '../src/federation/console_auth.js';
+import {
+  ConsoleChannelError,
   RedisConsoleChannel,
   redisConnectionsOf,
   resolveRedisConnection,
+  UNSIGNED_CHANNEL,
 } from '../src/federation/redis_channel.js';
 import { ControlPlane } from '../src/http/control_plane.js';
 import type { ConfigRuntime } from '../src/runtime.js';
@@ -69,6 +84,29 @@ declare module '@adonisjs/core/types' {
   interface ContainerBindings {
     'agora.config': ConfigRuntime;
   }
+}
+
+/**
+ * Logs a refused or failed console command once per reason (a flood of garbage on the channel is
+ * one line, not one per message). Never throws: a bad message is logged and dropped.
+ */
+function oncePerReason(logger: { warn(message: string): void }): (error: unknown) => void {
+  const seen = new Set<string>();
+  return (error) => {
+    try {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (seen.has(reason)) return;
+      if (seen.size < 100) seen.add(reason);
+      // A refusal carries one of the uniform reasons (§11b); anything else (Redis down) is a failure.
+      logger.warn(
+        error instanceof ConsoleChannelError && error.code === UNSIGNED_CHANNEL
+          ? `[@adonis-agora/config] console commands: refused a command (${reason})`
+          : `[@adonis-agora/config] console commands: a command failed (${reason})`,
+      );
+    } catch {
+      // A logger that throws must not take the channel down either.
+    }
+  };
 }
 
 /** This console's id in the `'agora.consoles'` registry. */
@@ -104,8 +142,14 @@ export default class ConfigProvider {
   #consoleConfig: ResolvedConsoleConfig | undefined;
   /** The other apps the console shows (`console.federatedApps`). */
   #federated: FederatedConfigApps | undefined;
+  /** The app's key, resolved by {@link appKeyOf} when the runtime is built. */
+  #appKeyValue: AppKey | undefined;
   /** The channel this app answers other consoles on (`consoleCommands`). */
   #consoleChannel: RedisConsoleChannel | undefined;
+  /** How this app authenticates the commands it answers, resolved at boot (web only). */
+  #consoleAuth: ResolvedConsoleAuth | undefined;
+  /** `@adonis-agora/crypto` and authkit-client in this app, looked up once (web only). */
+  #siblings: Promise<ConsoleSiblings> | undefined;
 
   constructor(protected app: ApplicationService) {}
 
@@ -144,6 +188,8 @@ export default class ConfigProvider {
 
   async #doBuild(): Promise<ConfigRuntime> {
     const config = this.#config();
+    // `app.appKey`, else config/encryption.ts's default key, else APP_KEY (resolved once).
+    this.#appKeyValue = await appKeyOf(this.app);
     const environment = config.environment ?? this.#nodeEnvironment();
     const logger = await this.#logger();
     if (config.topology === 'tenant') return this.#tenant(config, environment, logger);
@@ -194,14 +240,16 @@ export default class ConfigProvider {
         localEnv: config.tenant.localEnv ?? this.#nodeEnvironment() !== 'production',
         logger,
       });
-    if (!bootstrapped) {
-      // Ace commands must not open a stream or start polling; they only need the values once.
-      if (this.#isConsole()) await client.load();
-      else await client.start();
-    } else if (keys) {
+    // Values are loaded in every process (ace needs them too); the stream and the polling run
+    // only where the process serves (`web`, or `tenant.watch: true` for a long-running worker),
+    // so `node ace`, the REPL and tests exit when done. Shutdown stops them (abort + timers).
+    if (!bootstrapped) await client.load();
+    else if (keys) {
       // The bootstrap phase built the client before the app root existed: attach the keyring now.
       await client.useKeys(keys);
     }
+    const watch = config.tenant.watch ?? this.app.getEnvironment() === 'web';
+    if (watch) await client.start();
     client.onChange((change) => {
       emitConfig('tenant.reload', {
         app: status.app,
@@ -323,7 +371,7 @@ export default class ConfigProvider {
         environment,
         ...(config.prefix ? { prefix: config.prefix } : {}),
         ...(config.corsOrigins ? { corsOrigins: config.corsOrigins } : {}),
-        ...(config.vault ? { vault: config.vault.resolve } : {}),
+        ...(config.vault ? { vault: scopedVaultResolver(config.vault) } : {}),
         ...(transport ? { transport } : {}),
         logger,
       });
@@ -331,7 +379,7 @@ export default class ConfigProvider {
     const admin = new ConfigAdmin({
       store,
       canRevealSecrets: consoleConfig.revealSecrets,
-      ...(config.vault ? { vault: config.vault.resolve } : {}),
+      ...(config.vault ? { vault: scopedVaultResolver(config.vault) } : {}),
       ...(transport ? { transport } : {}),
       // Every write (console, MCP, command) reaches the streams of this process immediately; another
       // replica catches up on the stream's own 15s version poll.
@@ -373,6 +421,22 @@ export default class ConfigProvider {
    * key there is no codec: writing a secret fails loudly.
    */
   async #secretCodec(crypto: CryptoOptions | undefined): Promise<SecretCodec | undefined> {
+    const codec = await this.#keyringCodec(crypto);
+    if (!codec) return undefined;
+    // Fingerprints hash secrets through an HMAC keyed by the app key (or the first `crypto.keys`
+    // key), never as a bare hash a reader without the secret could confirm guesses against.
+    const first = crypto?.keys?.[0];
+    const secret =
+      this.#appKey() ??
+      (first === undefined
+        ? undefined
+        : typeof first === 'object' && first !== null && 'secret' in first
+          ? first.secret
+          : first);
+    return secret === undefined ? codec : withFingerprintKey(codec, secret);
+  }
+
+  async #keyringCodec(crypto: CryptoOptions | undefined): Promise<SecretCodec | undefined> {
     try {
       if (crypto?.keys?.length || crypto?.encryption) {
         return keyringCodec(
@@ -491,6 +555,42 @@ export default class ConfigProvider {
       for (const [key, entry] of Object.entries(config.federatedApps)) {
         validateFederatedConfigApp(key, entry, redisConnections);
       }
+      // Web only (where commands are sent): each entry that may act must resolve a mode, or the
+      // boot fails here naming the line to add. Ace commands send none, so never fail them.
+      const siblings = this.#isWeb() ? await this.#consoleSiblings() : undefined;
+      if (this.#isWeb()) {
+        for (const [key, entry] of Object.entries(config.federatedApps)) {
+          if (entry.controlPlane instanceof RedisConsoleChannel) continue;
+          const auth = resolveFederatedAppAuth({
+            id: key,
+            partition: entry.partition ?? key,
+            actions: entry.actions !== false,
+            controlPlane: entry.controlPlane,
+            siblings,
+          });
+          logger.info(
+            `[@adonis-agora/config] console commands to "${key}": ${auth.modes.join(' + ') || 'none (actions: false, browse only)'}`,
+          );
+          // Crypto embedded here: create that app's key now, not on the first command.
+          const service = siblings?.crypto?.service;
+          if (auth.autoCrypto && service) {
+            const partition = entry.partition ?? key;
+            void ensureConsoleKey(service, partition)
+              .then((outcome) => {
+                if (outcome === 'created') {
+                  logger.info(
+                    `[@adonis-agora/config] console commands: created the crypto key "console-config" in partition ${partition}`,
+                  );
+                }
+              })
+              .catch((error: unknown) =>
+                logger.warn(
+                  `[@adonis-agora/config] console commands to "${key}": could not create the crypto key "console-config" in partition ${partition} (${error instanceof Error ? error.message : String(error)}); run \`node ace crypto:keys:create console-config --type aes256-gcm --application ${partition}\` (retried on the first command)`,
+                ),
+              );
+          }
+        }
+      }
       const container = this.app.container;
       this.#federated = new FederatedConfigApps(config.federatedApps, {
         async db(connection) {
@@ -503,6 +603,8 @@ export default class ConfigProvider {
           return db.connection(connection);
         },
         redis: (connection) => resolveRedisConnection(container, connection),
+        ...(siblings ? { siblings } : {}),
+        logger,
       });
     }
     const console = new ConfigConsole({
@@ -599,6 +701,7 @@ export default class ConfigProvider {
     const runtime = await this.#build();
     const logger = await this.#logger();
     await registerDoctorChecks(this.app.container, agoraDoctorChecks);
+    if (runtime.topology !== 'tenant') await this.#resolveConsoleCommands(logger);
     if (runtime.topology !== 'tenant') {
       await this.#registerConsole(logger);
       await this.#mountConsole(logger);
@@ -691,28 +794,104 @@ export default class ConfigProvider {
           '[@adonis-agora/config] consoleCommands: no APP_KEY, so this app takes no changes from another console',
         );
       }
-      const partitions =
-        options.partitions ?? (this.#runtime?.app ? [this.#runtime.app] : undefined);
+      // Never "every partition" by default: a control plane (no app of its own) lists them.
+      const partitions = options.partitions ?? (this.#runtime?.app ? [this.#runtime.app] : []);
+      if (partitions.length === 0) {
+        logger.warn(
+          '[@adonis-agora/config] consoleCommands: no `partitions` and no app of its own, so this app answers for none; list them in consoleCommands.partitions',
+        );
+      }
+      const auth = this.#consoleAuth;
+      if (!auth) return;
+      const keys = appKey ? consoleCommandKeys(appKey, options.prefix) : undefined;
+      // Token mode: the console seals its token to a key derived from APP_KEY.
+      const tokenMode = auth.tokenMode && keys !== undefined;
+      // Publishing the key tells a console "reach me in token mode" (§13a): only when that is how
+      // this app is reached. With crypto active it is not (§13e: nothing published, nothing said),
+      // unless crypto commands must carry a token too (explicit crypto + verifyTenant, migrating).
+      const publish =
+        tokenMode && keys !== undefined && (!auth.crypto || auth.cryptoToken === 'required');
+      if (auth.crypto && !publish) {
+        // A key an older version of this app published would still steer consoles to token mode:
+        // remove this app's own row (idempotent; never fails the boot).
+        try {
+          const { removed } = (await admin.store.removeTenantKeys?.(
+            consoleKeyOwner(options.prefix),
+          )) ?? {
+            removed: 0,
+          };
+          if (removed > 0) {
+            logger.info(
+              '[@adonis-agora/config] console commands: removed the console command key it no longer publishes (crypto is enough)',
+            );
+          }
+        } catch {
+          // a store that cannot delete (read-only role) keeps the row; consoles fall back (§13a)
+        }
+      }
+      if (publish && keys) {
+        // The console seals each command (and its token) to this key, and reads it from this
+        // app's store, never from Redis. Idempotent: the same APP_KEY re-registers the same kid.
+        const { d: _private, ...publicKey } = keys.publicKey;
+        await admin.store.registerTenantKey?.({
+          app: consoleKeyOwner(options.prefix),
+          kid: keys.publicKey.kid,
+          publicKey,
+          active: true,
+          createdAt: new Date().toISOString(),
+          createdBy: 'config:console-commands',
+        });
+        // And in authkit's key directory, for a console without SELECT on this store's keys.
+        const authkit = (await this.#consoleSiblings()).authkit;
+        if (typeof authkit?.publishAppKey === 'function') {
+          void Promise.resolve()
+            .then(() => authkit.publishAppKey!({ purpose: CONSOLE_KEY_PURPOSE, jwk: publicKey }))
+            .catch((error: unknown) =>
+              logger.warn(
+                `[@adonis-agora/config] console commands: could not publish this app's command key in authkit (${error instanceof Error ? error.message : String(error)}); consoles read it from this app's store meanwhile`,
+              ),
+            );
+        }
+      }
       const channel = new RedisConsoleChannel({
         client: await resolveRedisConnection(this.app.container, options.connection),
         prefix: options.prefix,
+        ...(auth.secret !== undefined ? { secret: auth.secret } : {}),
+        ...(auth.crypto ? { crypto: auth.crypto, cryptoToken: auth.cryptoToken ?? 'none' } : {}),
+        ...(auth.verifyTenant !== undefined ? { verifyTenant: auth.verifyTenant } : {}),
+        ...(auth.verifyAppCall ? { verifyAppCall: auth.verifyAppCall } : {}),
+        ...(tokenMode ? { keys } : {}),
       });
+      const siblings = await this.#consoleSiblings();
+      if (
+        auth.autoCrypto &&
+        siblings.crypto?.service &&
+        typeof auth.crypto?.cipher === 'function'
+      ) {
+        // Crypto embedded here: create the key now, so a console can seal before the first command.
+        const ensure = auth.crypto.cipher;
+        void Promise.resolve()
+          .then(() => ensure())
+          .catch((error: unknown) =>
+            logger.warn(
+              `[@adonis-agora/config] console commands: could not create the crypto key "console-config" in partition ${siblings.crypto?.partition} (${error instanceof Error ? error.message : String(error)}); run \`node ace crypto:keys:create console-config --type aes256-gcm --application ${siblings.crypto?.partition}\` (retried on the first command)`,
+            ),
+          );
+      } else if (auth.checkKey) {
+        // A crypto tenant: one line when the console key is missing, refused or unreachable.
+        void auth.checkKey();
+      }
       await channel.answer(
         configConsoleCommandHandler({
           admin,
           prefix: options.prefix,
           actions: options.actions === true,
           reveal: options.reveal === true,
-          ...(partitions ? { partitions } : {}),
-          ...(appKey ? { keys: consoleCommandKeys(appKey, options.prefix) } : {}),
+          partitions,
+          ...(keys ? { keys } : {}),
           log: (line) => logger.info(line),
         }),
-        {
-          onError: (error) =>
-            logger.warn(
-              `[@adonis-agora/config] federated console command failed: ${error instanceof Error ? error.message : String(error)}`,
-            ),
-        },
+        { onError: oncePerReason(logger) },
       );
       this.#consoleChannel = channel;
     } catch (error) {
@@ -722,24 +901,58 @@ export default class ConfigProvider {
     }
   }
 
+  #isWeb(): boolean {
+    return this.app.getEnvironment() === 'web';
+  }
+
+  /** `@adonis-agora/crypto` and authkit-client when booted in this app (looked up once). */
+  #consoleSiblings(): Promise<ConsoleSiblings> {
+    this.#siblings ??= consoleSiblingsOf(this.app.container);
+    return this.#siblings;
+  }
+
+  /**
+   * `consoleCommands`: resolve how this app authenticates the commands it answers, in the web
+   * process (where the channel starts). Throws when no mode resolves, so a misconfigured app fails
+   * its boot instead of silently answering nothing.
+   */
+  async #resolveConsoleCommands(logger: {
+    info(message: string): void;
+    warn(message: string): void;
+  }): Promise<void> {
+    const config = this.app.config.get<ConfigConfig | undefined>('config');
+    if (!config || config.topology === 'tenant') return;
+    const options = config.consoleCommands;
+    if (!options || !this.#isWeb()) return;
+    const appKey = this.#appKey();
+    const auth = resolveAppConsoleAuth({
+      options,
+      fallbackVerifyTenant: config.topology === 'control-plane' ? config.verifyTenant : undefined,
+      hasAppKey: appKey !== undefined,
+      // A short id only: never key material in a log line.
+      ...(appKey
+        ? { commandKeyId: consoleCommandKeys(appKey, options.prefix).publicKey.kid.slice(0, 8) }
+        : {}),
+      siblings: await this.#consoleSiblings(),
+      logKey: (note) => logger[note.level](note.line),
+    });
+    this.#consoleAuth = auth;
+    logger.info(
+      `[@adonis-agora/config] console commands: ${auth.modes.join(' + ')}; ${options.actions === true ? 'actions on' : 'actions off (set consoleCommands.actions to let the console act)'}`,
+    );
+  }
+
   /** The app's key (`config/app.ts` → `appKey`, else `APP_KEY`): what seals console commands. */
-  #appKey(): string | { release(): string } | undefined {
-    const configured = this.app.config.get<unknown>('app.appKey', undefined);
-    if (typeof configured === 'string' && configured.length >= 16) return configured;
-    if (
-      configured &&
-      typeof configured === 'object' &&
-      typeof (configured as { release?: unknown }).release === 'function'
-    ) {
-      return configured as { release(): string };
-    }
-    const env = process.env.APP_KEY;
-    return env && env.length >= 16 ? env : undefined;
+  /** The app's key, as {@link appKeyOf} resolved it at build time (§13c). */
+  #appKey(): AppKey | undefined {
+    return this.#appKeyValue;
   }
 
   async shutdown(): Promise<void> {
     await this.#consoleChannel?.close();
     this.#consoleChannel = undefined;
+    this.#consoleAuth = undefined;
+    this.#siblings = undefined;
     await this.#federated?.close();
     this.#federated = undefined;
     await this.#runtime?.client?.stop();

@@ -20,9 +20,11 @@ const META: Meta = {
 
 const originalFetch = globalThis.fetch;
 let urls: string[] = [];
+let meta: Meta = META;
 
 beforeEach(() => {
   urls = [];
+  meta = META;
   const data = document.createElement('script');
   data.id = 'config-dashboard-config';
   data.type = 'application/json';
@@ -32,7 +34,7 @@ beforeEach(() => {
     const url = String(input);
     urls.push(url);
     const body = url.includes('/meta')
-      ? META
+      ? meta
       : url.includes('/scopes')
         ? {
             environments: ['prod', 'staging-et'],
@@ -108,5 +110,18 @@ describe('the federated config console', () => {
     const buttons = screen.getAllByRole('button', { name: 'New entry' }) as HTMLButtonElement[];
     expect(buttons.every((button) => button.disabled)).toBe(true);
     expect(buttons[0]?.title).toMatch(/read-only here/);
+  });
+
+  it("a viewer narrowed to reads by authorize sees the changes disabled on this console's own app", async () => {
+    meta = { ...META, viewer: { capabilities: ['config:read'], canWrite: false } };
+    window.history.replaceState(null, '', '/config#/entries?app=eduliberta');
+    renderApp();
+    await screen.findByRole('heading', { name: 'Entries' });
+    await waitFor(() => {
+      const buttons = screen.getAllByRole('button', { name: 'New entry' }) as HTMLButtonElement[];
+      expect(buttons.every((button) => button.disabled)).toBe(true);
+    });
+    const [button] = screen.getAllByRole('button', { name: 'New entry' });
+    expect(button?.title).toMatch(/does not include config:write/);
   });
 });

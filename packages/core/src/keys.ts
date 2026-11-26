@@ -28,6 +28,30 @@ export function assertConfigKey(key: string): void {
   }
 }
 
+/**
+ * What a label (or an environment) may look like: printable ASCII without quotes, spaces or
+ * backslashes, at most 128 characters. Branch-like names (`release/1.2`, `v1.0.0+build`) pass.
+ */
+const SCOPE_NAME = /^[A-Za-z0-9_.:/@+-]{1,128}$/;
+
+/** Whether `name` is a valid label or environment name (see {@link assertScopeName}). */
+export function isValidScopeName(name: unknown): name is string {
+  return typeof name === 'string' && SCOPE_NAME.test(name);
+}
+
+/**
+ * Throws unless `name` is a valid label or environment. A label arrives from a query string or a
+ * header and ends up in response headers (the ETag) and in-memory maps, so anything else — control
+ * characters, non-latin1 text, unbounded length — is refused before it gets there.
+ */
+export function assertScopeName(name: unknown, what = 'label'): asserts name is string {
+  if (!isValidScopeName(name)) {
+    throw new Error(
+      `config: invalid ${what} (letters, digits and _ . : / @ + -, at most 128 characters)`,
+    );
+  }
+}
+
 /** Whether `value` is a `vault://provider/path#field` reference. */
 export function isVaultReference(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('vault://');

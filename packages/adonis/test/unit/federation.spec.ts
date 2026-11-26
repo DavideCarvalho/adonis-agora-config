@@ -41,6 +41,8 @@ const command = (verb: string, args: unknown[] = [], extra: Record<string, unkno
   verb,
   args,
   actor: 'ana',
+  // The console always sends its viewer's capabilities.
+  capabilities: ['config:*'],
   ...extra,
 });
 
@@ -54,6 +56,59 @@ describe('configConsoleCommandHandler', () => {
     expect(await (await owner()).handler(command('writeKey'))).toEqual(keys.publicKey);
     expect(await (await owner({ actions: false })).handler(command('writeKey'))).toBeNull();
     expect(keys.publicKey).not.toHaveProperty('d');
+  });
+
+  it('checks in order: verb known, capabilities present, viewer, then the app switches', async () => {
+    // An unknown verb is unsupported even without capabilities.
+    await expect(
+      (await owner()).handler(command('exportEverything', [], { capabilities: undefined })),
+    ).rejects.toMatchObject({ code: UNSUPPORTED });
+    // A viewer without config:write is refused before "actions is off" is said.
+    await expect(
+      (await owner({ actions: false })).handler(
+        command('unsetEntry', [{ scope, key: 'api.token' }], { capabilities: ['config:read'] }),
+      ),
+    ).rejects.toMatchObject({ status: 403, message: 'the viewer lacks config:write' });
+    await expect(
+      (await owner({ reveal: false })).handler(
+        command('reveal', [{ scope, key: 'api.token' }], { capabilities: ['config:read'] }),
+      ),
+    ).rejects.toMatchObject({ status: 403, message: 'the viewer lacks config:secrets:read' });
+  });
+
+  it('refuses a command without capabilities, never taking it as "everything"', async () => {
+    const { handler, admin } = await owner();
+    for (const verb of ['writeKey', 'unsetEntry', 'rollback', 'reveal', 'setEntry']) {
+      await expect(
+        handler(command(verb, [{ scope, key: 'api.token', to: 1 }], { capabilities: undefined })),
+      ).rejects.toMatchObject({ status: 403, code: 'capabilities-required' });
+    }
+    expect((await admin.getEntry(scope, 'api.token', { canReadSecrets: false }))?.key).toBe(
+      'api.token',
+    );
+  });
+
+  it('runs set, unset and rollback only for a viewer with config:write', async () => {
+    const { handler, admin } = await owner();
+    const reader = { capabilities: ['config:read', 'config:secrets:read'] };
+    await expect(handler(command('writeKey', [], reader))).rejects.toMatchObject({ status: 403 });
+    await expect(
+      handler(command('unsetEntry', [{ scope, key: 'api.token' }], reader)),
+    ).rejects.toMatchObject({ status: 403, message: /lacks config:write/ });
+    await expect(handler(command('rollback', [{ scope, to: 1 }], reader))).rejects.toMatchObject({
+      status: 403,
+    });
+    const sealed = sealTo(keys.publicKey, JSON.stringify({ value: 'v1' }), {
+      aad: writeAad('et', scope, 'a.b'),
+    });
+    await expect(
+      handler(command('setEntry', [{ scope, key: 'a.b', sealed }], reader)),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(await admin.getEntry(scope, 'a.b', { canReadSecrets: false })).toBeNull();
+    await handler(
+      command('unsetEntry', [{ scope, key: 'api.token' }], { capabilities: ['config:write'] }),
+    );
+    expect(await admin.getEntry(scope, 'api.token', { canReadSecrets: false })).toBeNull();
   });
 
   it('only touches the partitions it serves', async () => {
@@ -80,7 +135,9 @@ describe('configConsoleCommandHandler', () => {
     const { handler } = await owner();
     const requester = generateKeyPair('x25519');
     const args = [{ scope, key: 'api.token', recipient: requester.publicKey }];
-    await expect(handler(command('reveal', args))).rejects.toMatchObject({ status: 403 });
+    await expect(handler(command('reveal', args, { capabilities: [] }))).rejects.toMatchObject({
+      status: 403,
+    });
     await expect(
       handler(command('reveal', args, { capabilities: ['config:read'] })),
     ).rejects.toMatchObject({ status: 403 });
