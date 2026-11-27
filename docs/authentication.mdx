@@ -37,6 +37,26 @@ export default defineConfig({
 })
 ```
 
+On the app, authkit-client's `service` is that client: with it configured, the app's file is one
+line, and the token for `urn:agora:config` (cached, dropped after a `401`), the control plane's URL
+and the partition come from it ([An app](/docs/config/tenant)).
+
+```ts title="config/authkit_client.ts (an app)"
+service: {
+  name: 'streaming',
+  clientId: env.get('AUTHKIT_SERVICE_CLIENT_ID'),
+  clientSecret: env.get('AUTHKIT_SERVICE_CLIENT_SECRET'),
+},
+```
+
+```ts title="config/config.ts (an app)"
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({ topology: 'tenant' })
+```
+
+Without authkit-client's `service` (or with another client), build the token yourself:
+
 ```ts title="config/config.ts (an app)"
 import { authkitTenantToken } from '@adonis-agora/authkit-client'
 

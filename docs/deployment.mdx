@@ -39,14 +39,19 @@ AUTHKIT_ISSUER=…       # only the verifier needs it
 ```
 
 **Each app** — an AdonisJS app with `topology: 'tenant'`, its own snapshot directory, and nothing
-else:
+else. With `@adonis-agora/authkit-client`'s `service` set to the app's service-tenant client, the
+control plane's URL, the token and the partition come from authkit-client
+([An app](/docs/config/tenant)): the app needs only authkit-client's issuer and that client's
+credentials. `bootstrapConfig()` (step 2 below) runs before authkit-client exists, so an app that
+uses it also sets the URL and its name:
 
 ```sh
+AUTHKIT_ISSUER=…
+AUTHKIT_SERVICE_CLIENT_ID=…
+AUTHKIT_SERVICE_CLIENT_SECRET=…
+# only for bootstrapConfig() in bin/server.ts, or without authkit-client:
 CONFIG_URL=https://config.example.com/_config
 CONFIG_APP=streaming
-AUTHKIT_ISSUER=…
-AUTHKIT_CLIENT_ID=…
-AUTHKIT_CLIENT_SECRET=…
 ```
 
 The app never reads authkit-server's tables, never calls the control plane for each request, and never

@@ -41,6 +41,28 @@ called lazily per request; no authkit-server code runs in this process.
 
 ## An Adonis app
 
+The app's `service` in `config/authkit_client.ts` is that client. With it configured, one line is
+enough: authkit-client discovers the control plane for `urn:agora:config` from the issuer, mints the
+token with the service's credentials, and gives `service.partition` (else `service.name`) as the
+partition ([An app](/docs/config/tenant)).
+
+```ts title="config/authkit_client.ts (an app)"
+service: {
+  name: 'streaming',
+  clientId: env.get('AUTHKIT_SERVICE_CLIENT_ID'),
+  clientSecret: env.get('AUTHKIT_SERVICE_CLIENT_SECRET'),
+},
+```
+
+```ts title="config/config.ts (an app)"
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({ topology: 'tenant' })
+```
+
+Each field you pass wins over the discovered one. Without `service` (or with a different client),
+pass all three; the token is authkit-client's helper:
+
 ```ts title="config/config.ts (an app)"
 import { authkitTenantToken } from '@adonis-agora/authkit-client'
 import { defineConfig } from '@adonis-agora/config'
@@ -62,8 +84,9 @@ export default defineConfig({
 
 `authkitTenantToken` returns a function with `token()` and `reset()`: it caches the token, refreshes
 it before expiry, and a `401` makes the tenant call `reset()` and fetch a new one. Config has no
-token helper of its own — the authkit-client helper is the whole story. The same function is passed
-to `bootstrapConfig` in `bin/server.ts` (it is lazy; nothing is fetched until the first call).
+token helper of its own — authkit-client is the whole story, whether through `service` or this
+helper. The same function is passed to `bootstrapConfig` in `bin/server.ts` (it is lazy; nothing is
+fetched until the first call).
 
 The bootstrap phase is the one place where the token must be obtainable **before** the app's config
 loads: keep the issuer, client id and secret in the environment, and build the token source there
