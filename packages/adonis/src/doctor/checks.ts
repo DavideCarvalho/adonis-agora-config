@@ -5,6 +5,14 @@ import type { ConfigConfig, TenantTopologyConfig } from '../define_config.js';
 import { getRuntime, hasRuntime } from '../services/accessor.js';
 import { LucidStore } from '../store/lucid_store.js';
 import { missingConfigColumns } from '../store/schema.js';
+import {
+  describeTenantSources,
+  type ResolvedTenantTopologyConfig,
+  resolveTenantConfig,
+  resolveTenantFields,
+  TenantFieldsError,
+  tenantFieldsError,
+} from '../topology/tenant_auto.js';
 import { createTenantClient } from '../topology/tenant_client.js';
 import { TenantUrl } from '../topology/tenant_url.js';
 import { resolveTenantToken } from '../topology/token.js';
@@ -13,17 +21,43 @@ import { consoleCommandsCheck, consoleCommandsKeyCheck } from './console_command
 
 const DOCS = 'https://davidecarvalho.github.io/agora/docs/config';
 
-function tenantConfig(app: ApplicationService): TenantTopologyConfig | null {
+function rawTenantConfig(app: ApplicationService): TenantTopologyConfig | null {
   const config = app.config.get<ConfigConfig | undefined>('config');
   return config?.topology === 'tenant' ? config : null;
 }
 
-function tenantEnvironment(config: TenantTopologyConfig): string {
+/**
+ * The tenant config with url/token/partition merged from authkit-client (explicit wins), or `null`
+ * on a server, or the error naming what nothing supplied.
+ */
+async function tenantConfig(
+  app: ApplicationService,
+): Promise<ResolvedTenantTopologyConfig | TenantFieldsError | null> {
+  const config = rawTenantConfig(app);
+  if (!config) return null;
+  try {
+    return (await resolveTenantConfig((app as { container?: unknown }).container, config)).config;
+  } catch (error) {
+    if (error instanceof TenantFieldsError) return error;
+    throw error;
+  }
+}
+
+function fieldsError(error: TenantFieldsError): AgoraDoctorResult {
+  return {
+    status: 'error',
+    message: `${describeTenantSources(error.sources)}.`,
+    fix: error.message,
+    docs: `${DOCS}/tenant`,
+  };
+}
+
+function tenantEnvironment(config: ResolvedTenantTopologyConfig): string {
   return config.tenant.environment ?? config.environment ?? process.env.NODE_ENV ?? 'production';
 }
 
 /** The headers a tenant call carries: the token, plus the claims a shared-secret verifier needs. */
-async function headers(config: TenantTopologyConfig): Promise<Record<string, string>> {
+async function headers(config: ResolvedTenantTopologyConfig): Promise<Record<string, string>> {
   const token = await resolveTenantToken(config.tenant.token).get();
   return {
     authorization: `Bearer ${token}`,
@@ -41,12 +75,36 @@ async function headers(config: TenantTopologyConfig): Promise<Record<string, str
  */
 export const agoraDoctorChecks: AgoraDoctorCheck[] = [
   {
+    id: 'config.tenant-source',
+    lib: 'config',
+    title: 'Tenant url, token and partition',
+    cost: 'cheap',
+    run: async (app): Promise<AgoraDoctorResult> => {
+      const config = rawTenantConfig(app);
+      if (!config) return { status: 'skip', message: 'Not a tenant.' };
+      const fields = await resolveTenantFields(
+        (app as { container?: unknown }).container,
+        config.tenant,
+      );
+      if (fields.missing.length > 0) {
+        return {
+          status: 'error',
+          message: `${describeTenantSources(fields.sources)}.`,
+          fix: tenantFieldsError(fields).message,
+          docs: `${DOCS}/tenant`,
+        };
+      }
+      return { status: 'ok', message: `${describeTenantSources(fields.sources)}.` };
+    },
+  },
+  {
     id: 'config.reachable',
     lib: 'config',
     title: 'Control plane reachable',
     cost: 'deep',
     run: async (app): Promise<AgoraDoctorResult> => {
-      const config = tenantConfig(app);
+      const config = await tenantConfig(app);
+      if (config instanceof TenantFieldsError) return fieldsError(config);
       if (!config) {
         const server = app.config.get<ConfigConfig | undefined>('config');
         return server?.topology === 'control-plane'
@@ -108,7 +166,8 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
     title: 'Tenant token accepted',
     cost: 'deep',
     run: async (app): Promise<AgoraDoctorResult> => {
-      const config = tenantConfig(app);
+      const config = await tenantConfig(app);
+      if (config instanceof TenantFieldsError) return fieldsError(config);
       if (!config) {
         return {
           status: 'skip',
@@ -170,8 +229,8 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
     title: 'Snapshot is fresh',
     cost: 'cheap',
     run: async (app): Promise<AgoraDoctorResult> => {
-      const config = tenantConfig(app);
-      if (!config?.tenant.snapshotPath) {
+      const config = rawTenantConfig(app);
+      if (!config?.tenant?.snapshotPath) {
         return {
           status: 'skip',
           message:
@@ -212,9 +271,9 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
     title: 'Sail worktree keeps its ports',
     cost: 'cheap',
     run: async (app): Promise<AgoraDoctorResult> => {
-      const config = tenantConfig(app);
+      const config = rawTenantConfig(app);
       if (!config) return { status: 'skip', message: 'Not a tenant.' };
-      if (config.tenant.localEnv !== false && config.tenant.localEnv !== undefined) {
+      if (config.tenant?.localEnv !== false && config.tenant?.localEnv !== undefined) {
         return { status: 'ok', message: 'tenant.localEnv is on: local variables win per key.' };
       }
       if (process.env.NODE_ENV === 'production') {
@@ -321,7 +380,7 @@ export const agoraDoctorChecks: AgoraDoctorCheck[] = [
           message: 'Only a tenant holds the private key secrets are sealed to.',
         };
       }
-      if (config.tenant.keyPath === false) {
+      if (config.tenant?.keyPath === false) {
         return {
           status: 'ok',
           message: 'tenant.keyPath is false: this app receives no sealed secrets.',

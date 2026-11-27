@@ -71,6 +71,11 @@ import type { ConfigStore } from '../src/store/store.js';
 import { configTelescopeExtension } from '../src/telescope/extension.js';
 import { registerConfigTelescopeExtension } from '../src/telescope/register.js';
 import {
+  type ResolvedTenantTopologyConfig,
+  resolveTenantConfig,
+  TenantFieldsError,
+} from '../src/topology/tenant_auto.js';
+import {
   createTenantClient,
   type TenantClient,
   takeTenantBootstrap,
@@ -192,12 +197,16 @@ export default class ConfigProvider {
     this.#appKeyValue = await appKeyOf(this.app);
     const environment = config.environment ?? this.#nodeEnvironment();
     const logger = await this.#logger();
-    if (config.topology === 'tenant') return this.#tenant(config, environment, logger);
+    if (config.topology === 'tenant') {
+      // url/token/partition left out come from authkit-client (its `service`); explicit wins.
+      const { config: resolved } = await resolveTenantConfig(this.app.container, config);
+      return this.#tenant(resolved, environment, logger);
+    }
     return this.#server(config, environment, logger);
   }
 
   async #tenant(
-    config: TenantTopologyConfig,
+    config: ResolvedTenantTopologyConfig,
     environment: string,
     logger: { info(message: string): void; warn(message: string): void },
   ): Promise<ConfigRuntime> {
@@ -301,7 +310,7 @@ export default class ConfigProvider {
    * usable key there is no keyring: entries sealed to this app stay masked.
    */
   async #tenantKeyring(
-    config: TenantTopologyConfig,
+    config: ResolvedTenantTopologyConfig,
     logger: { info(message: string): void; warn(message: string): void },
   ): Promise<TenantKeyring | undefined> {
     if (config.tenant.keyPath === false) return undefined;
@@ -698,8 +707,19 @@ export default class ConfigProvider {
   }
 
   async boot(): Promise<void> {
-    const runtime = await this.#build();
     const logger = await this.#logger();
+    let runtime: ConfigRuntime;
+    try {
+      runtime = await this.#build();
+    } catch (error) {
+      // A tenant without url/token/partition (and no authkit-client `service` to discover them)
+      // refuses to boot where it serves; `node ace`, the REPL and tests warn instead, so
+      // `agora:doctor` and the other commands still run, and `agora.config` throws when used.
+      if (!(error instanceof TenantFieldsError) || this.#isWeb()) throw error;
+      logger.warn(error.message);
+      await registerDoctorChecks(this.app.container, agoraDoctorChecks);
+      return;
+    }
     await registerDoctorChecks(this.app.container, agoraDoctorChecks);
     if (runtime.topology !== 'tenant') await this.#resolveConsoleCommands(logger);
     if (runtime.topology !== 'tenant') {

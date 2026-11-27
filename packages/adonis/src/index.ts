@@ -93,6 +93,7 @@ export {
   type StandaloneConfig,
   scopedVaultResolver,
   stores,
+  type TenantSettings,
   type TenantTopologyConfig,
   type VaultConfig,
   type VaultContext,
@@ -129,6 +130,13 @@ export type {
   VersionSummary,
   WriteContext,
 } from './store/store.js';
+export {
+  type AuthkitTenantLike,
+  type ResolvedTenantFields,
+  resolveTenantFields,
+  type TenantFieldSource,
+  TenantFieldsError,
+} from './topology/tenant_auto.js';
 export {
   type ConfigChangeSet,
   createTenantClient,
