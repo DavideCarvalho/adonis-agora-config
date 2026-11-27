@@ -186,7 +186,7 @@ At boot each side logs what it resolved:
 #### And with authkit's calls between apps
 
 When `@adonis-agora/authkit-client` is booted too, with the owning app in the console app's `apps`
-and a `service` on the owning app (its [calls between apps](/docs/authkit/app-calls)), each command
+and a `service` on the owning app (its [calls between apps](/docs/authkit/calls-between-apps)), each command
 also carries an **app-call token** for the owning app, inside the seal. Grant the console app
 `config:*` (or `config:read` / `config:write` / `config:secrets:read`) on the owning app in authkit,
 once. The owning app verifies the token by its audience (`urn:agora:app:<app>`), so its `partition`
