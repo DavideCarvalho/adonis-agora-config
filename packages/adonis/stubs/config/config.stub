@@ -1,7 +1,7 @@
 {{{
   exports({ to: app.configPath('config.ts') })
 }}}
-import env from '#start/env'
+// import env from '#start/env'
 import { defineConfig } from '@adonis-agora/config'
 
 /**
@@ -12,15 +12,14 @@ import { defineConfig } from '@adonis-agora/config'
  * before any provider boots. Without it, values arrive at boot for controllers and services.
  */
 export default defineConfig({
+  // url, token and partition come from @adonis-agora/authkit-client (\`service\` in
+  // config/authkit_client.ts). To set them yourself (each field you set wins):
+  // tenant: {
+  //   url: env.get('CONFIG_URL'),
+  //   partition: env.get('CONFIG_APP'),
+  //   token: env.get('CONFIG_TOKEN'),
+  //   // Boot with the last configuration received when the server is unreachable:
+  //   snapshotPath: 'storage/config/snapshot.json',
+  // },
   topology: 'tenant',
-  tenant: {
-    url: env.get('CONFIG_URL'),
-    partition: env.get('CONFIG_APP'),
-    // With authkit: authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' })
-    token: env.get('CONFIG_TOKEN'),
-    environment: env.get('NODE_ENV'),
-    snapshotPath: 'storage/config/snapshot.json',
-    // On outside production: a Sail worktree's ports in .env.local win over the server's.
-    localEnv: env.get('NODE_ENV') !== 'production',
-  },
 })

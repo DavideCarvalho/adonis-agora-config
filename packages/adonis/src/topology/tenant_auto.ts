@@ -136,7 +136,7 @@ export class TenantFieldsError extends Error {
     const fields = missing.map((field) => `tenant.${field}`).join(', ');
     const cause = authkitError ? ` (authkit-client: ${authkitError})` : '';
     super(
-      `[@adonis-agora/config] topology 'tenant' needs ${fields}${cause}. Configure @adonis-agora/authkit-client's \`service\` (config/authkit.ts: service: { name, clientId, clientSecret }) so they are discovered from the issuer, or pass tenant: { url, token, partition } in config/config.ts.`,
+      `[@adonis-agora/config] topology 'tenant' needs ${fields}${cause}. Configure @adonis-agora/authkit-client's \`service\` (config/authkit_client.ts: service: { name, clientId, clientSecret }) so they are discovered from the issuer, or pass tenant: { url, token, partition } in config/config.ts.`,
     );
     this.name = 'TenantFieldsError';
   }
