@@ -5,8 +5,9 @@ import { stubsRoot } from './stubs/main.js';
  * `node ace add @adonis-agora/config`:
  *
  * 1. registers the provider in `adonisrc.ts`;
- * 2. publishes `config/config.ts` as a tenant (the common case: one app reading from a server);
- * 3. adds the three tenant variables to the env validations.
+ * 2. publishes `config/config.ts` as a tenant (the common case: one app reading from a server), in
+ *    the one-line form: url, token and partition come from @adonis-agora/authkit-client;
+ * 3. adds the three tenant variables (for the explicit form) to the env validations.
  *
  * For the control plane, change `topology` and add `verifyTenant` (the docs show both shapes). The
  * provider is the same for every topology.

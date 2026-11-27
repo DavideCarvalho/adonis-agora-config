@@ -40,7 +40,7 @@ afterEach(async () => {
 });
 
 const ERROR_TAIL =
-  "Configure @adonis-agora/authkit-client's `service` (config/authkit.ts: service: { name, clientId, clientSecret }) so they are discovered from the issuer, or pass tenant: { url, token, partition } in config/config.ts.";
+  "Configure @adonis-agora/authkit-client's `service` (config/authkit_client.ts: service: { name, clientId, clientSecret }) so they are discovered from the issuer, or pass tenant: { url, token, partition } in config/config.ts.";
 
 /** A control plane serving `db.host` to the `shop` partition, behind a shared secret. */
 async function controlPlane(): Promise<string> {
@@ -241,7 +241,7 @@ describe('tenant url, token and partition from authkit-client', () => {
     const authkit = {
       tenantOf: () => {
         throw Object.assign(
-          new Error('authkit-client: tenantOf() needs `service` in config/authkit.ts'),
+          new Error('authkit-client: tenantOf() needs `service` in config/authkit_client.ts'),
           { code: 'E_AUTHKIT_SERVICE_NOT_CONFIGURED' },
         );
       },
@@ -249,7 +249,7 @@ describe('tenant url, token and partition from authkit-client', () => {
     await expect(
       boot(defineConfig({ topology: 'tenant' }) as ConfigConfig, { authkit }),
     ).rejects.toThrow(
-      `needs tenant.url, tenant.token, tenant.partition (authkit-client: authkit-client: tenantOf() needs \`service\` in config/authkit.ts). ${ERROR_TAIL}`,
+      `needs tenant.url, tenant.token, tenant.partition (authkit-client: authkit-client: tenantOf() needs \`service\` in config/authkit_client.ts). ${ERROR_TAIL}`,
     );
     // An explicit tenant is unaffected by an authkit-client without `service`.
     const fields = await resolveTenantFields(
