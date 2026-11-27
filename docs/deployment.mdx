@@ -12,6 +12,18 @@ Three deployments are supported, with the same vocabulary as the other Agora lib
 | `control-plane` | yes, every app | yes | no |
 | `tenant` | no | no | yes |
 
+## Three ways to run it
+
+- **Standalone** (the default, no `topology` needed): the app owns its configuration in its own
+  database and serves its own console.
+- **Federated console**: each app stays standalone, and one console reaches them over
+  authenticated commands. The configuration and its keys stay in each app. See
+  [Federated console](/docs/config/federated-console).
+- **Hub**: one `control-plane` server owns every app's configuration, and the apps run
+  `topology: 'tenant'`. With `@adonis-agora/authkit-client`'s `service` configured,
+  `defineConfig({ topology: 'tenant' })` is the whole app config ([An app](/docs/config/tenant)).
+  See the [Agora Hub guide](https://davidecarvalho.github.io/agora/docs/agora-hub).
+
 ## One server, two apps, one authkit
 
 ```
