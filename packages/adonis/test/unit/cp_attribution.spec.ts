@@ -136,7 +136,7 @@ describe('lazy tenant url', () => {
     expect(() =>
       defineConfig({
         topology: 'tenant',
-        tenant: { url: undefined as never, partition: 'shop', token: 's' },
+        tenant: { url: undefined as never, partition: 'shop', auto: false, token: 's' },
       }),
     ).toThrow(/tenant.url is required/);
   });

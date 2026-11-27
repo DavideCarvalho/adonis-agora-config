@@ -51,20 +51,27 @@ describe('defineConfig', () => {
     ).toThrow(/only applies to topology/);
   });
 
-  it('refuses a tenant without a URL, partition or token', () => {
+  it('accepts a one-line tenant (authkit-client supplies url, token and partition at boot)', () => {
+    expect(defineConfig({ topology: 'tenant' })).toMatchObject({ topology: 'tenant' });
+    expect(() =>
+      defineConfig({ topology: 'tenant', tenant: { partition: 'shop', snapshotPath: 's.json' } }),
+    ).not.toThrow();
+  });
+
+  it('refuses a tenant without a URL, partition or token when auto-detection is off', () => {
     expect(() =>
       defineConfig({ topology: 'tenant', tenant: { url: '', partition: 'shop', token: 's' } }),
     ).toThrow(/tenant.url/);
     expect(() =>
       defineConfig({
         topology: 'tenant',
-        tenant: { url: 'https://c.test', partition: '', token: 's' },
+        tenant: { url: 'https://c.test', partition: '', token: 's', auto: false },
       }),
     ).toThrow(/tenant.partition/);
     expect(() =>
       defineConfig({
         topology: 'tenant',
-        tenant: { url: 'https://c.test', partition: 'shop' },
+        tenant: { url: 'https://c.test', partition: 'shop', auto: false },
       } as never),
     ).toThrow(/tenant.token/);
     expect(() =>

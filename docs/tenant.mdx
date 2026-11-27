@@ -7,6 +7,23 @@ icon: Plug
 A tenant owns no configuration. It fetches its scope from the control plane at boot, keeps the last
 document on disk, and stays current over a stream with polling as a fallback.
 
+With `@adonis-agora/authkit-client` configured (its `service: { name, clientId, clientSecret }` and
+issuer), one line is enough: the control plane URL, the token and the partition come from it.
+
+```ts title="config/config.ts"
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({ topology: 'tenant' })
+```
+
+authkit-client discovers the URL for `urn:agora:config` from the issuer, fetches a service token
+for it (client credentials, cached, dropped after a 401), and gives `service.partition` (else
+`service.name`) as the partition. This package does not depend on authkit-client: it reads its
+`authkit.client` binding when it is booted in the app.
+
+Anything you pass wins, field by field, so you can keep the discovered URL and token and still name
+the partition, or bring your own of everything:
+
 ```ts title="config/config.ts"
 import env from '#start/env'
 import { defineConfig } from '@adonis-agora/config'
@@ -26,9 +43,10 @@ export default defineConfig({
 
 | Option | Default | |
 | --- | --- | --- |
-| `url` | — | the control plane, including its prefix (`https://config.example.com/_config`), or a function resolving it (see below) |
-| `partition` | — | this app's name |
-| `token` | — | a string, a function, `{ get() }`, or `authkitTenantToken(...)` |
+| `url` | authkit-client | the control plane, including its prefix (`https://config.example.com/_config`), or a function resolving it (see below) |
+| `partition` | authkit-client | this app's name |
+| `token` | authkit-client | a string, a function, `{ get() }`, or `authkitTenantToken(...)` |
+| `auto` | `true` | take the fields left out from authkit-client; `false` turns that off and all three are required |
 | `environment` | `NODE_ENV` | the scope's environment |
 | `label` | `main` | the scope's label (profile, branch) |
 | `snapshotPath` | none | the last document, for booting during an outage |
@@ -42,6 +60,16 @@ export default defineConfig({
 | `keyPath` | `storage/config-tenant-key.json` | this app's X25519 private key, sealed with APP_KEY; `false` disables sealed secrets |
 | `registerKey` | `true` | publish the public key to the control plane on connect |
 | `transport` | `transports.http()` | how this app watches the control plane: `transports.redis(...)` or `transports.durable(...)`; the document is still fetched over HTTP |
+
+Without authkit-client's `service` and without the three fields, the web process refuses to boot
+and says which fields are missing and both fixes (`node ace` commands only warn, so
+`node ace agora:doctor` still runs). `node ace agora:doctor --verbose` shows where each field came
+from:
+
+```txt
+  ✔ Tenant url, token and partition
+    tenant url: authkit-client (auto), token: authkit-client (auto), partition: explicit.
+```
 
 ## Finding the control plane through authkit
 

@@ -9,6 +9,7 @@ import { describeStackUse, hasLucidConnection, lucidUse, type StackUse } from '.
 import { LucidStore } from './store/lucid_store.js';
 import { MemoryStore } from './store/memory_store.js';
 import type { ConfigStore } from './store/store.js';
+import type { TenantConnectionFields } from './topology/tenant_auto.js';
 import { isTenantUrlSource, type TenantUrlSource } from './topology/tenant_url.js';
 import type { TenantTokenSource } from './topology/token.js';
 import type { TenantVerifierInput } from './topology/verify.js';
@@ -250,76 +251,88 @@ export interface ConfigConsoleCommandsConfig {
   secret?: string | { release(): string };
 }
 
+/**
+ * `tenant` in config/config.ts. With `@adonis-agora/authkit-client` booted (its `service`),
+ * `url`, `token` and `partition` may all be left out: they are discovered from the issuer for
+ * `urn:agora:config`. Anything given here wins, field by field.
+ */
+export interface TenantSettings extends TenantConnectionFields {
+  /**
+   * The control plane's base URL (`https://config.example.com/_config`), or a function resolving
+   * it before the first request: `controlPlaneUrl({ issuer, resource: 'urn:agora:config' })` from
+   * `@adonis-agora/authkit-client`. A lazy URL is looked up again (its `refresh()`) when the
+   * control plane stops answering. Default (with authkit-client's `service`): discovered from the
+   * issuer.
+   */
+  url?: TenantUrlSource;
+  /**
+   * This app's name on the control plane (the partition). Default (with authkit-client's
+   * `service`): its `service.partition`, else `service.name`.
+   */
+  partition?: string;
+  /**
+   * The bearer token: a fixed shared secret, a function, or an object with `get()`. With authkit:
+   * `authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' })` from
+   * `@adonis-agora/authkit-client` (a function with `token()`/`reset()`). Obtainable before the
+   * app's config loads: keep issuer/client id/secret in the environment. Default (with
+   * authkit-client's `service`): its client-credentials token for `urn:agora:config`.
+   */
+  token?: TenantTokenSource;
+  /** The environment to read. Default: the process's `NODE_ENV`, else `production`. */
+  environment?: string;
+  /** The label (profile) to read. Default `main`. */
+  label?: string;
+  /**
+   * File holding the last document received. Read when the control plane is unreachable at boot,
+   * so a deploy during an outage still boots with real configuration.
+   */
+  snapshotPath?: string;
+  /** Use server-sent events for push updates. Default `true`; polling always runs as a fallback. */
+  stream?: boolean;
+  /**
+   * Keep the configuration fresh in this process (the SSE stream, or a broker watch, plus
+   * polling). Default: only in a process that serves (`web`); never in `node ace`, the REPL or
+   * tests, so they exit when done. `true` for a worker process that runs long (a queue worker
+   * started through ace); `false` to load once even in `web`.
+   */
+  watch?: boolean;
+  /** Poll interval (ms). Default 30000 with streaming, 5000 without. */
+  intervalMs?: number;
+  /** Fail the boot when the server is unreachable AND no snapshot exists. Default `false`. */
+  required?: boolean;
+  /**
+   * Keys that may hot-reload, in addition to the entries marked `reloadable` on the control plane.
+   * Everything else needs a restart, and the console says so.
+   */
+  reloadable?: string[];
+  /** Apply the received values to `process.env` too (only keys that are not already set). */
+  env?: boolean;
+  /**
+   * Let `process.env` win over the remote value of a key that is set there (`DB_PORT` for
+   * `db.port`). On by default outside production, which is what keeps a Sail worktree on its own
+   * ports after `sail:sync-env`: the config server's `db.port` never shadows them in dev.
+   */
+  localEnv?: boolean;
+  /**
+   * Where this app's X25519 private key lives, relative to the app root. Default
+   * `storage/config-tenant-key.json`; the file is created (mode 0600) on first boot and the
+   * private key is sealed with APP_KEY. `false` turns sealed secrets off for this app.
+   */
+  keyPath?: string | false;
+  /** Publish the public key to the control plane on connect. Default `true` when `keyPath` is on. */
+  registerKey?: boolean;
+  /**
+   * How this tenant watches the control plane. Default `transports.http()` (SSE + poll); use
+   * `transports.redis(...)` or `transports.durable(...)` to watch over a broker. The document is
+   * always fetched over HTTP with this tenant's token.
+   */
+  transport?: ConfigTransportFactory;
+}
+
 /** An app that reads its configuration from a control plane. */
 export interface TenantTopologyConfig extends BaseConfig {
   topology: 'tenant';
-  tenant: {
-    /**
-     * The control plane's base URL (`https://config.example.com/_config`), or a function resolving
-     * it before the first request: `controlPlaneUrl({ issuer, resource: 'urn:agora:config' })` from
-     * `@adonis-agora/authkit-client`. A lazy URL is looked up again (its `refresh()`) when the
-     * control plane stops answering.
-     */
-    url: TenantUrlSource;
-    /** This app's name on the control plane (the partition). */
-    partition: string;
-    /**
-     * The bearer token: a fixed shared secret, a function, or an object with `get()`. With authkit:
-     * `authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' })` from
-     * `@adonis-agora/authkit-client` (a function with `token()`/`reset()`). Obtainable before the
-     * app's config loads: keep issuer/client id/secret in the environment.
-     */
-    token: TenantTokenSource;
-    /** The environment to read. Default: the process's `NODE_ENV`, else `production`. */
-    environment?: string;
-    /** The label (profile) to read. Default `main`. */
-    label?: string;
-    /**
-     * File holding the last document received. Read when the control plane is unreachable at boot,
-     * so a deploy during an outage still boots with real configuration.
-     */
-    snapshotPath?: string;
-    /** Use server-sent events for push updates. Default `true`; polling always runs as a fallback. */
-    stream?: boolean;
-    /**
-     * Keep the configuration fresh in this process (the SSE stream, or a broker watch, plus
-     * polling). Default: only in a process that serves (`web`); never in `node ace`, the REPL or
-     * tests, so they exit when done. `true` for a worker process that runs long (a queue worker
-     * started through ace); `false` to load once even in `web`.
-     */
-    watch?: boolean;
-    /** Poll interval (ms). Default 30000 with streaming, 5000 without. */
-    intervalMs?: number;
-    /** Fail the boot when the server is unreachable AND no snapshot exists. Default `false`. */
-    required?: boolean;
-    /**
-     * Keys that may hot-reload, in addition to the entries marked `reloadable` on the control plane.
-     * Everything else needs a restart, and the console says so.
-     */
-    reloadable?: string[];
-    /** Apply the received values to `process.env` too (only keys that are not already set). */
-    env?: boolean;
-    /**
-     * Let `process.env` win over the remote value of a key that is set there (`DB_PORT` for
-     * `db.port`). On by default outside production, which is what keeps a Sail worktree on its own
-     * ports after `sail:sync-env`: the config server's `db.port` never shadows them in dev.
-     */
-    localEnv?: boolean;
-    /**
-     * Where this app's X25519 private key lives, relative to the app root. Default
-     * `storage/config-tenant-key.json`; the file is created (mode 0600) on first boot and the
-     * private key is sealed with APP_KEY. `false` turns sealed secrets off for this app.
-     */
-    keyPath?: string | false;
-    /** Publish the public key to the control plane on connect. Default `true` when `keyPath` is on. */
-    registerKey?: boolean;
-    /**
-     * How this tenant watches the control plane. Default `transports.http()` (SSE + poll); use
-     * `transports.redis(...)` or `transports.durable(...)` to watch over a broker. The document is
-     * always fetched over HTTP with this tenant's token.
-     */
-    transport?: ConfigTransportFactory;
-  };
+  tenant?: TenantSettings;
   /**
    * What this app's pages may read (`config.browser()`, `@adonis-agora/config-client/react`): the
    * entries marked `browser` on the control plane plus `keys`, and whether a change reaches open
@@ -356,18 +369,22 @@ export function resolveStandaloneApp(
 export function defineConfig(config: ConfigConfig): ConfigConfig {
   const raw = config as ConfigConfig & { verifyTenant?: unknown; controlPlane?: unknown };
   if (config.topology === 'tenant') {
-    if (!isTenantUrlSource(config.tenant.url)) {
+    const tenant = config.tenant ?? {};
+    // With authkit-client auto-detection on (the default), a field left out is discovered at
+    // boot (authkit-client's `service`); the provider says what is missing when nothing supplies it.
+    const strict = tenant.auto === false;
+    if ((strict || tenant.url !== undefined) && !isTenantUrlSource(tenant.url)) {
       throw new Error(
         'config: tenant.url is required (an absolute http(s) URL, or a function resolving one)',
       );
     }
-    if (!config.tenant.partition) throw new Error('config: tenant.partition is required');
-    if (!config.tenant.token) {
+    if (strict && !tenant.partition) throw new Error('config: tenant.partition is required');
+    if (strict && !tenant.token) {
       throw new Error(
         "config: tenant.token is required (authkitTenantToken({ issuer, clientId, clientSecret, resource: 'urn:agora:config' }) or the shared secret)",
       );
     }
-    if (typeof config.tenant.url === 'string' && !/^https?:\/\//.test(config.tenant.url)) {
+    if (typeof tenant.url === 'string' && !/^https?:\/\//.test(tenant.url)) {
       throw new Error('config: tenant.url must be an absolute http(s) URL');
     }
     if (raw.verifyTenant !== undefined) {

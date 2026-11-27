@@ -47,6 +47,17 @@ csrf: { enabled: true, exceptRoutes: (ctx) => configCsrfExceptions(ctx.request.u
 node ace add @adonis-agora/config
 ```
 
+With `@adonis-agora/authkit-client` configured (its `service`), this is the whole file: the URL, the
+token and the partition come from it ([details](./tenant)).
+
+```ts title="config/config.ts (an app)"
+import { defineConfig } from '@adonis-agora/config'
+
+export default defineConfig({ topology: 'tenant' })
+```
+
+Without authkit-client, or to choose them yourself, pass them (each one you pass wins):
+
 ```ts title="config/config.ts (an app)"
 import env from '#start/env'
 import { defineConfig } from '@adonis-agora/config'
