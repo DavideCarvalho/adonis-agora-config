@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 1.1.1
+
+### Patch Changes
+
+- [#45](https://github.com/DavideCarvalho/adonis-agora-config/pull/45) [`cc2e249`](https://github.com/DavideCarvalho/adonis-agora-config/commit/cc2e24902c298e0b8765ce4428387d983d45b0b1) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `node ace add @adonis-agora/config` (and `node ace configure @adonis-agora/config`) now runs the configure hook: the main entry exports `configure`, which Adonis looks for there. Before, it only warned "the module does not export the configure hook" and published nothing.
+
 ## 1.1.0
 
 ### Minor Changes
