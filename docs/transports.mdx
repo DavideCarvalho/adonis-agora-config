@@ -27,19 +27,19 @@ and polling as a fallback. That is the behavior of every previous version.
 ## HTTP (default)
 
 ```ts title="config/config.ts (tenant)"
-import { defineConfig } from '@adonis-agora/config'
+import { defineConfig, transports } from '@adonis-agora/config'
 
 export default defineConfig({
   topology: 'tenant',
   tenant: {
-    url: env.get('CONFIG_URL'),
-    partition: 'streaming',
-    token: env.get('CONFIG_TOKEN'),
     // optional, for a proxy / mTLS / crypto envelope / tests:
     transport: transports.http({ timeoutMs: 5_000, fetch: myFetch }),
   },
 })
 ```
+
+`url`, `token` and `partition` come from `@adonis-agora/authkit-client`'s `service` here, as on
+[An app](/docs/config/tenant); without it, pass them next to `transport` (each one you pass wins).
 
 `url` overrides `tenant.url`; `fetch` replaces the global fetch for the config requests.
 
@@ -69,9 +69,6 @@ import { defineConfig, transports } from '@adonis-agora/config'
 export default defineConfig({
   topology: 'tenant',
   tenant: {
-    url: env.get('CONFIG_URL'),
-    partition: 'streaming',
-    token: env.get('CONFIG_TOKEN'),
     transport: transports.redis({
       connection: 'main',
       prefix: 'config',
@@ -109,7 +106,7 @@ const transport = transports.durable({ controlPlane })
 
 export default defineConfig({
   topology: 'tenant',
-  tenant: { url, partition, token, transport },
+  tenant: { transport },
 })
 ```
 

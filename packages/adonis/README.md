@@ -7,6 +7,15 @@ boot, keep a snapshot, and hot-reload the keys marked reloadable.
 ```ts title="config/config.ts (an app)"
 import { defineConfig } from '@adonis-agora/config'
 
+// With @adonis-agora/authkit-client's `service` configured, the URL, token and partition come from it.
+export default defineConfig({ topology: 'tenant' })
+```
+
+Without authkit-client, or to set them yourself (each field you pass wins):
+
+```ts title="config/config.ts (an app)"
+import { defineConfig } from '@adonis-agora/config'
+
 export default defineConfig({
   topology: 'tenant',
   tenant: {

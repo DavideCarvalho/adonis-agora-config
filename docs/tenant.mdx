@@ -73,11 +73,12 @@ from:
 
 ## Finding the control plane through authkit
 
-`url` also takes a function. With authkit, let the issuer's discovery document say where the
-control plane is:
+With authkit-client's `service`, the discovered URL is already what `url` gets: nothing to write.
+`url` also takes a function, for when you wire it yourself (another authkit client than `service`,
+say), and the issuer's discovery document can still say where the control plane is:
 
 ```ts title="config/config.ts"
-import { controlPlaneUrl } from '@adonis-agora/authkit-client'
+import { authkitTenantToken, controlPlaneUrl } from '@adonis-agora/authkit-client'
 
 tenant: {
   url: controlPlaneUrl({ issuer: env.get('AUTHKIT_ISSUER'), resource: 'urn:agora:config' }),
@@ -92,7 +93,8 @@ Any `() => Promise<string>` works; `refresh()` is optional.
 
 ## Booting before the app's config
 
-`config/*.ts` load before providers boot. The bootstrap entry runs before the application exists:
+`config/*.ts` load before providers boot. The bootstrap entry runs before the application exists,
+so authkit-client is not there yet: pass the URL, the partition and the token explicitly.
 
 ```ts title="bin/server.ts"
 import { bootstrapConfig } from '@adonis-agora/config/bootstrap'
