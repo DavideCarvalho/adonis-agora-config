@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 1.1.2
+
+### Patch Changes
+
+- [#47](https://github.com/DavideCarvalho/adonis-agora-config/pull/47) [`43557e2`](https://github.com/DavideCarvalho/adonis-agora-config/commit/43557e2b2ed4df677ee26f6b49eaa03d8369baca) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix `import '@adonis-agora/config'` failing in 1.1.1 with `Cannot find module …/dist/stubs/main.js` under plain Node (a compiled app; apps running through a TypeScript loader resolved it to the `.ts` source and did not notice). The build now compiles `stubs/main.ts` and no longer deletes it when copying the stubs, and `check:package` imports the built main entry with plain Node.
+
 ## 1.1.1
 
 ### Patch Changes
