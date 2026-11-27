@@ -1,5 +1,11 @@
 # @adonis-agora/config
 
+## 1.1.3
+
+### Patch Changes
+
+- [#48](https://github.com/DavideCarvalho/adonis-agora-config/pull/48) [`e6d336f`](https://github.com/DavideCarvalho/adonis-agora-config/commit/e6d336f0bb4877654bb2be9aed8241de9557dfc8) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - `node ace configure @adonis-agora/config` now writes the one-line tenant config (`defineConfig({ topology: 'tenant' })`, with url, token and partition coming from `@adonis-agora/authkit-client`), with the explicit `tenant` block shown as a comment. The tenant boot error now points at `config/authkit_client.ts`, the file where authkit-client's `service` lives (it said `config/authkit.ts`).
+
 ## 1.1.2
 
 ### Patch Changes
