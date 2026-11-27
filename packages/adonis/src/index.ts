@@ -22,6 +22,7 @@ export {
   type ScopeSummary,
   unflattenObject,
 } from '@adonis-agora/config-core';
+export { configure } from '../configure.js';
 export {
   ConfigAdmin,
   ConfigCursorError,
